@@ -52,8 +52,11 @@ The vault is protected with modern cryptography and optional biometric quick unl
 The latest signed Android release is available through GitHub Releases.
 
 <p align="center">
-  <a href="[https://github.com/Cheats121/Athena/releases/latest/download/athena-release.apk](https://github.com/Cheats121/Athena/releases/download/v1.1/athena_release.apk)">
-    <img src="https://img.shields.io/badge/Download-Latest%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white" alt="Download Athena APK">
+  <a href="https://github.com/Cheats121/Athena/releases/latest/download/athena_release.apk">
+    <img
+      src="https://img.shields.io/badge/Download-Latest%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white"
+      alt="Download Athena APK"
+    >
   </a>
 </p>
 
