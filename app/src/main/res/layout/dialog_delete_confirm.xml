@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="22dp"
+    android:background="@drawable/dialog_bg_rounded">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginEnd="12dp"
+            android:src="@drawable/ic_delete"
+            android:tint="@color/accent"
+            android:contentDescription="Delete entry" />
+
+        <TextView
+            android:id="@+id/dialogTitleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Delete Credential?"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:fontFamily="@font/poppins"
+            android:textStyle="normal" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/dialogMessageText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="This entry will be permanently removed from your vault."
+        android:textColor="@color/subtleText"
+        android:textSize="14sp"
+        android:fontFamily="@font/poppins"
+        android:lineSpacingExtra="2dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="22dp"
+        android:orientation="horizontal"
+        android:gravity="end">
+
+        <TextView
+            android:id="@+id/cancelButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="6dp"
+            android:text="CANCEL"
+            android:textAllCaps="true"
+            android:textColor="@color/subtleText"
+            android:textSize="14sp"
+            android:fontFamily="@font/poppins"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <TextView
+            android:id="@+id/yesButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="6dp"
+            android:text="DELETE"
+            android:textAllCaps="true"
+            android:textColor="@color/accent"
+            android:textSize="14sp"
+            android:fontFamily="@font/poppins"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+    </LinearLayout>
+
+</LinearLayout>

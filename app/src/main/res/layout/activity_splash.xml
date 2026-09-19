@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/vault_bg_gradient">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <ImageView
+            android:layout_width="132dp"
+            android:layout_height="132dp"
+            android:contentDescription="Athena Logo"
+            android:scaleType="centerInside"
+            android:src="@mipmap/athena_logo" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:fontFamily="@font/poppins"
+            android:letterSpacing="0.14"
+            android:text="ATHENA"
+            android:textColor="@android:color/white"
+            android:textSize="26sp"
+            android:textStyle="normal" />
+
+        <ProgressBar
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginTop="24dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/accent" />
+
+    </LinearLayout>
+
+</FrameLayout>

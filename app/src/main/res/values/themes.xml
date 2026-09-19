@@ -1,0 +1,38 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Main app theme -->
+    <style name="Theme.Athena" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Core colors (you can tweak these later if needed) -->
+        <item name="colorPrimary">@color/purple_700</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorAccent">@color/teal_200</item>
+
+        <!-- Backgrounds: match your new app background colour -->
+        <!-- If your main background is vault_bg_gradient, use that here -->
+        <item name="android:windowBackground">@drawable/vault_bg_gradient</item>
+        <item name="colorSurface">@color/background</item>
+        <item name="android:statusBarColor">@color/vaultBackground</item>
+        <item name="android:navigationBarColor">@color/vaultBackground</item>
+
+        <!-- Status bar icons: false = light icons/text -->
+        <item name="android:windowLightStatusBar">false</item>
+
+        <!-- Use Material dark theme overlay for Toolbars -->
+        <item name="actionBarTheme">@style/ThemeOverlay.MaterialComponents.Dark.ActionBar</item>
+    </style>
+
+    <!-- Splash theme (classic, no Android 12 attrs) -->
+    <style name="Theme.Athena.Splash" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Show your app background instantly -->
+        <item name="android:windowBackground">@drawable/vault_bg_gradient</item>
+
+        <!-- Fullscreen, no title bar -->
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+
+        <!-- Keep status bar icons light here as well -->
+        <item name="android:statusBarColor">@color/vaultBackground</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+</resources>

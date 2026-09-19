@@ -1,0 +1,27 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_home"
+        android:title="Home"
+        app:itemTextAppearance="@style/DrawerItemTextStyle" />
+
+    <item
+        android:id="@+id/nav_lock_vault"
+        android:icon="@drawable/ic_lock"
+        android:title="Lock Vault"
+        app:itemTextAppearance="@style/DrawerItemTextStyle" />
+
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/ic_edit_gear"
+        android:title="Backup"
+        app:itemTextAppearance="@style/DrawerItemTextStyle" />
+
+    <item
+        android:id="@+id/nav_about"
+        android:icon="@drawable/ic_info"
+        android:title="About"
+        app:itemTextAppearance="@style/DrawerItemTextStyle" />
+</menu>

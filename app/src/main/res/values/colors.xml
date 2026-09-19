@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#1F2A37</color>
+    <color name="colorPrimaryVariant">#111827</color>
+    <color name="colorAccent">#14B8A6</color>
+    <color name="backgroundColor">#0F172A</color>
+    <color name="surfaceColor">#1E293B</color>
+    <color name="textPrimary">#E2E8F0</color>
+    <color name="textSecondary">#94A3B8</color>
+    <color name="buttonColor">#14B8A6</color>
+    <color name="background_material_dark">#181A1B</color>
+    <color name="background">#121212</color>
+    <color name="purple_700">#3700B3</color>
+    <color name="teal_200">#03DAC5</color>
+    <color name="red">#FF5252</color>
+    <color name="accent">#00D4FF</color>
+    <color name="promptText">#FFFFFF</color>
+    <color name="darkGrey">#A9A9A9</color>
+    <color name="nav_divider">#252A32</color>
+
+    <color name="background_primary">#111827</color>
+    <color name="background_secondary">#182235</color>
+    <color name="card_background">#1F2937</color>
+    <color name="nav_drawer_background">#0F172A</color>
+    <color name="vaultBackground">#1A2433</color>
+
+    <color name="vaultGradientStart">#111827</color>
+    <color name="vaultGradientCenter">#182335</color>
+    <color name="vaultGradientEnd">#1F2937</color>
+
+    <color name="entryTitle">#E5E7EB</color>
+    <color name="subtleText">#9CA3AF</color>
+
+    <color name="keyTypePrimary">#FF6273</color>
+    <color name="keyTypeSecondary">#46C3FF</color>
+
+</resources>

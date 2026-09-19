@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+    Athena backup rules.
+
+    Athena does not permit Android Auto Backup to copy
+    app-private data. Vault backups, when implemented,
+    are handled explicitly by Athena using the encrypted
+    vault file itself.
+-->
+<full-backup-content>
+
+    <exclude
+        domain="file"
+        path="." />
+
+    <exclude
+        domain="database"
+        path="." />
+
+    <exclude
+        domain="sharedpref"
+        path="." />
+
+    <exclude
+        domain="root"
+        path="." />
+
+    <exclude
+        domain="external"
+        path="." />
+
+</full-backup-content>
