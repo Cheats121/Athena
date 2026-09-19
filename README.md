@@ -20,6 +20,7 @@
   <img alt="Security" src="https://img.shields.io/badge/encryption-AES--256--GCM-informational">
   <img alt="KDF" src="https://img.shields.io/badge/KDF-Argon2id-orange">
   <img alt="Tests" src="https://img.shields.io/badge/tests-passing-success">
+  <img alt="Release" src="https://img.shields.io/github/v/release/Cheats121/Athena">
 </p>
 
 ---
@@ -43,6 +44,29 @@ Athena does not require:
 - continuous internet access
 
 The vault is protected with modern cryptography and optional biometric quick unlock using Android Keystore.
+
+---
+
+## Download
+
+The latest signed Android release is available through GitHub Releases.
+
+<p align="center">
+  <a href="https://github.com/Cheats121/Athena/releases/latest/download/athena-release.apk">
+    <img src="https://img.shields.io/badge/Download-Latest%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white" alt="Download Athena APK">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Cheats121/Athena/releases/latest">
+    View latest release notes and verification information
+  </a>
+</p>
+
+> The APK is signed using Athena's release signing key.  
+> SHA-256 checksums are published with each GitHub release.
+
+Because Athena is distributed outside Google Play, Android may ask you to allow installation from your browser or file manager.
 
 ---
 
@@ -79,13 +103,13 @@ The vault is protected with modern cryptography and optional biometric quick unl
   - no cloud synchronization dependency
 
 - **Encrypted local vault**
-  - vault content protected using **AES-256-GCM**
+  - vault contents protected using **AES-256-GCM**
   - authenticated encryption provides confidentiality and integrity
   - tampered vault data is rejected
 
 - **Strong password-based key derivation**
   - master password processed using **Argon2id**
-  - configurable resource-intensive derivation settings
+  - memory-hard key derivation
   - defensive bounds applied to stored Argon2 parameters
 
 - **Separate KEK and DEK design**
@@ -108,7 +132,7 @@ The vault is protected with modern cryptography and optional biometric quick unl
 
 - **Secure clipboard handling**
   - copied passwords are automatically cleared
-  - newer clipboard operations cancel older pending clear timers
+  - newer copy operations cancel older pending clear timers
 
 - **Secure password generation**
   - cryptographically secure randomness
@@ -149,7 +173,7 @@ The user enters a master password.
 
 Athena processes the password using **Argon2id** to derive a 256-bit **Key Encryption Key (KEK)**.
 
-The KEK is used to protect the vault encryption key rather than directly encrypting all vault data.
+The KEK protects the vault encryption key rather than directly encrypting all vault data.
 
 ### 2. Random Vault DEK
 
@@ -161,11 +185,11 @@ The DEK is the key that actually encrypts and decrypts vault contents.
 
 The password-derived KEK wraps the DEK using authenticated encryption.
 
-This means:
+This design means:
 
-- changing how the master password is processed does not require redesigning vault data encryption
 - the master password is not directly used as the vault encryption key
 - the DEK remains independently random
+- password-derived key material and vault encryption responsibilities remain separated
 
 ### 4. Vault Encryption
 
@@ -195,7 +219,7 @@ StrongBox-backed storage is requested when the device supports it.
 
 ### 6. Runtime Key Handling
 
-After authentication, the DEK is held only in the active runtime session.
+After successful authentication, the DEK is held only in the active runtime session.
 
 Athena uses defensive copies and wipes sensitive byte arrays when the session ends or the vault is locked.
 
@@ -213,9 +237,9 @@ The master password is processed using **Argon2id** with:
 - multiple iterations
 - parallel processing lanes
 - random salt
-- bounds checking on stored Argon2 parameters
+- defensive bounds on stored Argon2 parameters
 
-This helps increase the cost of offline password guessing.
+This increases the computational cost of offline password guessing.
 
 ### Authenticated Encryption
 
@@ -231,7 +255,7 @@ Biometric quick unlock is implemented using:
 - Android Keystore
 - AES-GCM key wrapping
 - per-operation biometric authentication
-- enrollment invalidation
+- biometric enrollment invalidation
 
 ### Sensitive Action Re-authentication
 
@@ -243,7 +267,7 @@ Actions including password reveal, copy, edit, and deletion require additional a
 
 The vault DEK is kept in memory only during an active session.
 
-Persistent preferences store configuration and metadata, not the plaintext DEK.
+Persistent preferences store configuration and metadata rather than the plaintext DEK.
 
 ---
 
@@ -333,29 +357,163 @@ See [`TESTING.md`](TESTING.md) for the full testing breakdown.
 
 ---
 
-## Project Structure
+## Roadmap
 
-```text
-app/src/main/java/com/athena/j/athena/
-├── AboutActivity.kt
-├── AddEntryActivity.kt
-├── BaseSecureActivity.kt
-├── BiometricAuth.kt
-├── BiometricStore.kt
-├── ClipboardUtils.kt
-├── EditEntryActivity.kt
-├── EntryDetailActivity.kt
-├── InstantPasswordTransformationMethod.kt
-├── MainActivity.kt
-├── PasswordGenerator.kt
-├── SecureEditText.kt
-├── SplashActivity.kt
-├── TamperChecker.kt
-├── TimeoutManager.kt
-├── VaultActivity.kt
-├── VaultAdapter.kt
-├── VaultCrypto.kt
-├── VaultLocker.kt
-├── VaultManager.kt
-├── VaultRuntimeSession.kt
-└── VaultSessionManager.kt
+Athena currently focuses on secure local credential management on Android.
+
+Future development is planned around expanding portability and usability without abandoning Athena's local-first security model.
+
+### Encrypted Vault Backups
+
+Planned backup functionality will focus on preserving the encrypted vault rather than exporting credentials as plaintext.
+
+Goals include:
+
+- encrypted vault backup creation
+- safe backup verification
+- encrypted restore and import workflows
+- integrity verification before accepting restored vaults
+- no plaintext credential exports during the backup process
+
+### Seamless Credential Filling on PC
+
+A longer-term goal is to provide secure credential filling for desktop applications and websites.
+
+The intended direction includes:
+
+- authenticated credential retrieval
+- reduced reliance on manual copy and paste
+- explicit user authorization before filling sensitive credentials
+  
+### Cross-Device Workflows
+
+Athena may explore secure ways to move encrypted vault data between devices without requiring a traditional cloud account.
+
+The focus would remain on:
+
+- end-to-end encrypted data
+- user-controlled vault files
+- explicit device authorization
+- avoiding unnecessary server-side access to credential data
+
+### Accessibility and UX
+
+Future improvements may also include:
+
+- expanded accessibility support
+- smoother navigation
+- additional vault organization tools
+- improved credential management workflows
+
+---
+
+## Vault Format
+
+Athena currently uses its **v3 encrypted vault format**.
+
+At a high level, the vault contains:
+
+- vault format metadata
+- Argon2id parameters
+- random salt
+- vault identifier
+- wrapped DEK
+- encrypted vault payload
+- AES-GCM nonces and authentication data
+
+Plaintext credentials are not stored directly in the vault file.
+
+---
+
+## Build Instructions
+
+### Requirements
+
+- Android Studio
+- Android SDK
+- compatible JDK
+- Android device or emulator
+
+### Clone
+
+```bash
+git clone https://github.com/Cheats121/Athena.git
+cd Athena
+```
+
+Open the project in Android Studio and allow Gradle to sync.
+
+### Debug Build
+
+On Windows:
+
+```powershell
+.\gradlew assembleDebug
+```
+
+### Release Build
+
+Release builds should be generated using your own signing key.
+
+The repository intentionally does not include Athena's private release signing key.
+
+---
+
+## Privacy
+
+Athena is designed to operate locally.
+
+The application does not require:
+
+- cloud accounts
+- remote credential storage
+- analytics services
+- cloud synchronization
+- a backend server
+
+The user's encrypted vault remains under the user's control.
+
+---
+
+## Repository Contents
+
+This repository includes:
+
+- Kotlin source code
+- Android XML resources
+- security-related utilities
+- instrumented tests
+- Gradle configuration
+- ProGuard / R8 rules
+- backup exclusion rules
+- project documentation
+- demo media
+
+The repository intentionally excludes:
+
+- private signing keys
+- `.jks` / `.keystore` files
+- release APKs from source control
+- AAB files
+- local Android SDK paths
+- build directories
+- machine-specific configuration
+- secrets and environment files
+
+Release APKs are distributed separately through **GitHub Releases**.
+
+---
+
+## ⚠️ Disclaimer
+
+Athena is a personal and educational security-focused software project.
+
+It has **not undergone an independent professional security audit**.
+
+Users should review the source code, threat model, build process, and operational security assumptions before trusting Athena with real-world sensitive credentials.
+
+---
+
+## Author
+
+**Cheats121**
