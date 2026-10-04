@@ -19,248 +19,121 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class ClipboardUtilsInstrumentedTest {
 
-    // =============================================================
-    // ACTIVITY
-    // =============================================================
-
-    private var scenario:
-            ActivityScenario<MainActivity>? =
-        null
-
-    // =============================================================
-    // SETUP
-    // =============================================================
+    private var scenario: ActivityScenario<MainActivity>? = null
 
     @Before
     fun setup() {
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        scenario!!.moveToState(Lifecycle.State.RESUMED)
 
-        scenario =
-            ActivityScenario.launch(
-                MainActivity::class.java
-            )
-
-        scenario!!
-            .moveToState(
-                Lifecycle.State.RESUMED
-            )
-
-        Thread.sleep(
-            200L
-        )
-
+        Thread.sleep(200L)
         clearClipboard()
-
-        Thread.sleep(
-            50L
-        )
+        Thread.sleep(50L)
     }
-
-    // =============================================================
-    // CLEANUP
-    // =============================================================
 
     @After
     fun cleanup() {
-
         try {
-
             scenario?.onActivity { activity ->
-
-                ClipboardUtils.clearPendingSensitiveClipboard(
-                    activity
-                )
+                ClipboardUtils.clearPendingSensitiveClipboard(activity)
             }
-
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
         try {
             scenario?.close()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
-        scenario =
-            null
+        scenario = null
     }
 
-    // =============================================================
-    // HELPERS
-    // =============================================================
-
-    private fun runOnActivity(
-        action: (
-            MainActivity
-        ) -> Unit
-    ) {
-
-        val activeScenario =
-            scenario
-                ?: throw IllegalStateException(
-                    "ActivityScenario is not initialized"
-                )
+    private fun runOnActivity(action: (MainActivity) -> Unit) {
+        val activeScenario = scenario
+            ?: throw IllegalStateException("ActivityScenario is not initialized")
 
         activeScenario.onActivity { activity ->
-
-            action(
-                activity
-            )
+            action(activity)
         }
     }
 
     private fun clearClipboard() {
-
         runOnActivity { activity ->
-
             val clipboard =
-                activity.getSystemService(
-                    Context.CLIPBOARD_SERVICE
-                ) as ClipboardManager
+                activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
             try {
-
-                if (
-                    Build.VERSION.SDK_INT >=
-                    Build.VERSION_CODES.P
-                ) {
-
-                    if (
-                        clipboard.hasPrimaryClip()
-                    ) {
-
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    if (clipboard.hasPrimaryClip()) {
                         clipboard.clearPrimaryClip()
                     }
-
                 } else {
-
-                    clipboard.setPrimaryClip(
-                        ClipData.newPlainText(
-                            "",
-                            ""
-                        )
-                    )
+                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
                 }
-
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
         }
     }
 
     private fun readClipboardText(): String? {
-
-        var result: String? =
-            null
+        var result: String? = null
 
         runOnActivity { activity ->
-
             val clipboard =
-                activity.getSystemService(
-                    Context.CLIPBOARD_SERVICE
-                ) as ClipboardManager
+                activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-            if (
-                !clipboard.hasPrimaryClip()
-            ) {
-
-                result =
-                    null
-
+            if (!clipboard.hasPrimaryClip()) {
+                result = null
                 return@runOnActivity
             }
 
-            val clip =
-                clipboard.primaryClip
+            val clip = clipboard.primaryClip
 
-            if (
-                clip == null ||
-                clip.itemCount <= 0
-            ) {
-
-                result =
-                    null
-
+            if (clip == null || clip.itemCount <= 0) {
+                result = null
                 return@runOnActivity
             }
 
-            result =
-                clip
-                    .getItemAt(
-                        0
-                    )
-                    .coerceToText(
-                        activity
-                    )
-                    ?.toString()
+            result = clip.getItemAt(0).coerceToText(activity)?.toString()
         }
 
         return result
     }
 
     private fun readClipboardLabel(): String? {
-
-        var result: String? =
-            null
+        var result: String? = null
 
         runOnActivity { activity ->
-
             val clipboard =
-                activity.getSystemService(
-                    Context.CLIPBOARD_SERVICE
-                ) as ClipboardManager
+                activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-            result =
-                clipboard
-                    .primaryClipDescription
-                    ?.label
-                    ?.toString()
+            result = clipboard.primaryClipDescription?.label?.toString()
         }
 
         return result
     }
 
     private fun isClipboardMarkedSensitive(): Boolean {
-
-        var result =
-            false
+        var result = false
 
         runOnActivity { activity ->
-
             val clipboard =
-                activity.getSystemService(
-                    Context.CLIPBOARD_SERVICE
-                ) as ClipboardManager
+                activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-            val description =
-                clipboard
-                    .primaryClipDescription
+            val description = clipboard.primaryClipDescription
+            val extras = description?.extras
 
-            val extras =
-                description
-                    ?.extras
-
-            result =
-                extras
-                    ?.getBoolean(
-                        ClipDescription.EXTRA_IS_SENSITIVE,
-                        false
-                    )
-                    ?: false
+            result = extras?.getBoolean(
+                ClipDescription.EXTRA_IS_SENSITIVE,
+                false
+            ) ?: false
         }
 
         return result
     }
 
-    // =============================================================
-    // COPY
-    // =============================================================
-
     @Test
     fun copySensitive_placesTextOnClipboard() {
-
-        val secret =
-            "SuperSecretPassword123!"
+        val secret = "SuperSecretPassword123!"
 
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = secret,
@@ -268,9 +141,7 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
         assertEquals(
             "Sensitive text should be placed on clipboard",
@@ -279,18 +150,11 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // CUSTOM LABEL
-    // =============================================================
-
     @Test
     fun copySensitive_usesProvidedLabel() {
-
-        val label =
-            "Athena Password"
+        val label = "Athena Password"
 
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 label = label,
@@ -299,9 +163,7 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
         assertEquals(
             "Clipboard label should match supplied label",
@@ -310,15 +172,9 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // DEFAULT LABEL
-    // =============================================================
-
     @Test
     fun copySensitive_defaultLabelPath_copiesSuccessfully() {
-
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "secret",
@@ -326,9 +182,7 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
         assertEquals(
             "Default-label copy path should place text on clipboard",
@@ -337,15 +191,9 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // EMPTY STRING
-    // =============================================================
-
     @Test
     fun copySensitive_allowsEmptyString() {
-
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "",
@@ -353,25 +201,14 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
-        assertEquals(
-            "",
-            readClipboardText()
-        )
+        assertEquals("", readClipboardText())
     }
-
-    // =============================================================
-    // REPLACE
-    // =============================================================
 
     @Test
     fun secondCopy_replacesFirstClipboardValue() {
-
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "first-secret",
@@ -379,17 +216,11 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
-        assertEquals(
-            "first-secret",
-            readClipboardText()
-        )
+        assertEquals("first-secret", readClipboardText())
 
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "second-secret",
@@ -397,9 +228,7 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
         assertEquals(
             "Second sensitive copy should replace first",
@@ -408,37 +237,23 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // CLEAR AFTER DELAY
-    // =============================================================
-
     @Test
     fun copySensitive_clearsClipboardAfterConfiguredDelay() {
-
-        val secret =
-            "TemporarySecret"
-
-        val latch =
-            CountDownLatch(
-                1
-            )
+        val secret = "TemporarySecret"
+        val latch = CountDownLatch(1)
 
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = secret,
                 clearAfterMs = 300L,
                 onCleared = {
-
                     latch.countDown()
                 }
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
         assertEquals(
             "Clipboard should contain secret before timeout",
@@ -446,23 +261,16 @@ class ClipboardUtilsInstrumentedTest {
             readClipboardText()
         )
 
-        val callbackTriggered =
-            latch.await(
-                3,
-                TimeUnit.SECONDS
-            )
+        val callbackTriggered = latch.await(3, TimeUnit.SECONDS)
 
         assertTrue(
             "Clipboard clear callback should execute",
             callbackTriggered
         )
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
-        val after =
-            readClipboardText()
+        val after = readClipboardText()
 
         assertTrue(
             "Clipboard should be empty after timeout",
@@ -470,36 +278,22 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // CALLBACK
-    // =============================================================
-
     @Test
     fun copySensitive_invokesOnClearedCallback() {
-
-        val latch =
-            CountDownLatch(
-                1
-            )
+        val latch = CountDownLatch(1)
 
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "secret",
                 clearAfterMs = 200L,
                 onCleared = {
-
                     latch.countDown()
                 }
             )
         }
 
-        val callbackTriggered =
-            latch.await(
-                3,
-                TimeUnit.SECONDS
-            )
+        val callbackTriggered = latch.await(3, TimeUnit.SECONDS)
 
         assertTrue(
             "onCleared callback should execute",
@@ -507,47 +301,29 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // CALLBACK NOT IMMEDIATE
-    // =============================================================
-
     @Test
     fun onCleared_doesNotRunImmediately() {
-
-        val latch =
-            CountDownLatch(
-                1
-            )
+        val latch = CountDownLatch(1)
 
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "secret",
                 clearAfterMs = 500L,
                 onCleared = {
-
                     latch.countDown()
                 }
             )
         }
 
-        val ranTooEarly =
-            latch.await(
-                100L,
-                TimeUnit.MILLISECONDS
-            )
+        val ranTooEarly = latch.await(100L, TimeUnit.MILLISECONDS)
 
         assertFalse(
             "Clear callback must not run immediately",
             ranTooEarly
         )
 
-        val eventuallyRan =
-            latch.await(
-                2,
-                TimeUnit.SECONDS
-            )
+        val eventuallyRan = latch.await(2, TimeUnit.SECONDS)
 
         assertTrue(
             "Clear callback should execute after configured delay",
@@ -555,15 +331,9 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // CLEAR WITHOUT CALLBACK
-    // =============================================================
-
     @Test
     fun clipboardClearsWithoutOnClearedCallback() {
-
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "secret",
@@ -571,21 +341,13 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
-        assertEquals(
-            "secret",
-            readClipboardText()
-        )
+        assertEquals("secret", readClipboardText())
 
-        Thread.sleep(
-            400L
-        )
+        Thread.sleep(400L)
 
-        val result =
-            readClipboardText()
+        val result = readClipboardText()
 
         assertTrue(
             "Clipboard should clear even without callback",
@@ -593,22 +355,11 @@ class ClipboardUtilsInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // SENSITIVE FLAG
-    // =============================================================
-
     @Test
     fun copySensitive_marksClipboardSensitive_onApi33AndAbove() {
-
-        if (
-            Build.VERSION.SDK_INT < 33
-        ) {
-
-            return
-        }
+        if (Build.VERSION.SDK_INT < 33) return
 
         runOnActivity { activity ->
-
             ClipboardUtils.copySensitive(
                 context = activity,
                 text = "secret",
@@ -616,9 +367,7 @@ class ClipboardUtilsInstrumentedTest {
             )
         }
 
-        Thread.sleep(
-            100L
-        )
+        Thread.sleep(100L)
 
         assertTrue(
             "Clipboard should be marked sensitive on API 33+",

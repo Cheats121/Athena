@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <activity
+            android:name=".TestBaseSecureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true" />
+
+    </application>
+
+</manifest>

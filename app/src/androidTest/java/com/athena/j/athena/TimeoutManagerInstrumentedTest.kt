@@ -16,121 +16,68 @@ import org.junit.runner.RunWith
 class TimeoutManagerInstrumentedTest {
 
     private val context: Context
-        get() =
-            InstrumentationRegistry
-                .getInstrumentation()
-                .targetContext
+        get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    private var scenario:
-            ActivityScenario<MainActivity>? =
-        null
+    private var scenario: ActivityScenario<MainActivity>? = null
 
     @Before
     fun setup() {
-
         VaultRuntimeSession.clear()
-
         TimeoutManager.clear()
+        TimeoutManager.setTimeoutDurationForTesting(300L)
 
-        TimeoutManager.setTimeoutDurationForTesting(
-            300L
-        )
-
-        scenario =
-            ActivityScenario.launch(
-                MainActivity::class.java
-            )
-
-        scenario!!
-            .moveToState(
-                Lifecycle.State.RESUMED
-            )
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        scenario!!.moveToState(Lifecycle.State.RESUMED)
     }
 
     @After
     fun cleanup() {
-
         try {
             TimeoutManager.clear()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
         try {
             TimeoutManager.resetTimeoutDurationForTesting()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
         try {
             VaultRuntimeSession.clear()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
         try {
             scenario?.close()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
-        scenario =
-            null
+        scenario = null
     }
 
-    private fun runOnActivity(
-        action: (
-            MainActivity
-        ) -> Unit
-    ) {
-
-        val activeScenario =
-            scenario
-                ?: throw IllegalStateException(
-                    "ActivityScenario not initialized"
-                )
+    private fun runOnActivity(action: (MainActivity) -> Unit) {
+        val activeScenario = scenario
+            ?: throw IllegalStateException("ActivityScenario not initialized")
 
         activeScenario.onActivity { activity ->
-
-            action(
-                activity
-            )
+            action(activity)
         }
     }
 
     private fun unlockRuntimeSession() {
+        val uri = Uri.parse("content://athena/timeout-test")
+        val dek = ByteArray(32) { 0x11 }
 
-        val uri =
-            Uri.parse(
-                "content://athena/timeout-test"
-            )
-
-        val dek =
-            ByteArray(
-                32
-            ) {
-                0x11
-            }
-
-        VaultRuntimeSession.setSession(
-            uri,
-            dek
-        )
+        VaultRuntimeSession.setSession(uri, dek)
 
         dek.fill(0)
     }
 
     @Test
     fun resetTimeout_keepsSessionUnlockedBeforeDeadline() {
-
         unlockRuntimeSession()
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
-        Thread.sleep(
-            150L
-        )
+        Thread.sleep(150L)
 
         assertTrue(
             "Session should remain unlocked before timeout expires",
@@ -140,65 +87,44 @@ class TimeoutManagerInstrumentedTest {
 
     @Test
     fun foregroundInactivity_locksVaultAfterTimeout() {
-
         unlockRuntimeSession()
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
-        Thread.sleep(
-            700L
-        )
+        Thread.sleep(700L)
 
         assertFalse(
             "Foreground inactivity should destroy runtime session",
             VaultRuntimeSession.isUnlocked()
         )
 
-        assertNull(
-            VaultRuntimeSession.getVaultDek()
-        )
+        assertNull(VaultRuntimeSession.getVaultDek())
     }
 
     @Test
     fun userInteraction_resetsCountdown() {
-
         unlockRuntimeSession()
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
-        Thread.sleep(
-            200L
-        )
+        Thread.sleep(200L)
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
-        Thread.sleep(
-            200L
-        )
+        Thread.sleep(200L)
 
         assertTrue(
             "Second interaction should extend the timeout window",
             VaultRuntimeSession.isUnlocked()
         )
 
-        Thread.sleep(
-            300L
-        )
+        Thread.sleep(300L)
 
         assertFalse(
             "Session should eventually lock after no further interaction",
@@ -208,21 +134,15 @@ class TimeoutManagerInstrumentedTest {
 
     @Test
     fun stopTimer_doesNotDisableTimeout() {
-
         unlockRuntimeSession()
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
         TimeoutManager.stopTimer()
 
-        Thread.sleep(
-            700L
-        )
+        Thread.sleep(700L)
 
         assertFalse(
             "Backgrounding must not disable inactivity locking",
@@ -232,49 +152,35 @@ class TimeoutManagerInstrumentedTest {
 
     @Test
     fun backgroundTimeout_destroysDek() {
-
         unlockRuntimeSession()
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
         TimeoutManager.stopTimer()
 
-        Thread.sleep(
-            700L
-        )
+        Thread.sleep(700L)
 
         assertNull(
             "Background timeout must destroy DEK",
             VaultRuntimeSession.getVaultDek()
         )
 
-        assertFalse(
-            VaultRuntimeSession.isUnlocked()
-        )
+        assertFalse(VaultRuntimeSession.isUnlocked())
     }
 
     @Test
     fun clear_cancelsScheduledTimeoutState() {
-
         unlockRuntimeSession()
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
         TimeoutManager.clear()
 
-        Thread.sleep(
-            500L
-        )
+        Thread.sleep(500L)
 
         assertTrue(
             "Clearing TimeoutManager state should cancel pending timeout runnable",
@@ -284,35 +190,21 @@ class TimeoutManagerInstrumentedTest {
 
     @Test
     fun resetTimeout_whenNoVaultUnlocked_doesNotCreateSession() {
-
         VaultRuntimeSession.clear()
 
         runOnActivity { activity ->
-
-            TimeoutManager.resetTimeout(
-                activity
-            )
+            TimeoutManager.resetTimeout(activity)
         }
 
-        Thread.sleep(
-            400L
-        )
+        Thread.sleep(400L)
 
-        assertFalse(
-            VaultRuntimeSession.isUnlocked()
-        )
-
-        assertNull(
-            VaultRuntimeSession.getVaultDek()
-        )
+        assertFalse(VaultRuntimeSession.isUnlocked())
+        assertNull(VaultRuntimeSession.getVaultDek())
     }
 
     @Test
     fun timeoutDurationOverride_isApplied() {
-
-        TimeoutManager.setTimeoutDurationForTesting(
-            1234L
-        )
+        TimeoutManager.setTimeoutDurationForTesting(1234L)
 
         assertEquals(
             1234L,

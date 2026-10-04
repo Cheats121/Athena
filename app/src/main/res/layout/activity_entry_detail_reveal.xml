@@ -175,8 +175,6 @@
                 android:src="@drawable/ic_copy"
                 app:tint="@color/accent" />
 
-            <!-- Hide Password -->
-
             <ImageView
                 android:id="@+id/eyeButton"
                 android:layout_width="24dp"

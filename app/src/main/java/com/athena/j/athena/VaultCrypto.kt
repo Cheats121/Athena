@@ -6,34 +6,33 @@ import android.net.Uri
 import android.util.Base64
 import org.bouncycastle.crypto.generators.Argon2BytesGenerator
 import org.bouncycastle.crypto.params.Argon2Parameters
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
+import java.time.Instant
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.UUID
-import java.time.Instant
 
 object VaultCrypto {
-    // ---- KDF / Crypto params ----
-    private const val ARGON_TIME = 4               // slight bump for extra hardness
-    private const val ARGON_MEMORY_KIB = 65_536    // 64 MiB
+    private const val ARGON_TIME = 4
+    private const val ARGON_MEMORY_KIB = 65_536
     private const val ARGON_PARALLELISM = 4
-    private const val KEY_LEN = 32                 // 32 bytes = 256-bit AES key
-    private const val AES_NONCE_LEN = 12           // 96-bit nonce for GCM
+    private const val KEY_LEN = 32
+    private const val AES_NONCE_LEN = 12
     private const val GCM_TAG_BITS = 128
+    private fun b64enc(bytes: ByteArray): String {
+        return Base64.encodeToString(bytes, Base64.NO_WRAP)
+    }
 
-    // --- helpers ---
-    private fun b64enc(bytes: ByteArray): String =
-        Base64.encodeToString(bytes, Base64.NO_WRAP)
-
-    private fun b64dec(s: String): ByteArray =
-        Base64.decode(s, Base64.NO_WRAP)
+    private fun b64dec(s: String): ByteArray {
+        return Base64.decode(s, Base64.NO_WRAP)
+    }
 
     fun deriveKey(masterPasswordUtf8: ByteArray, salt: ByteArray): ByteArray {
         val params = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
@@ -46,10 +45,14 @@ object VaultCrypto {
         gen.init(params)
         val out = ByteArray(KEY_LEN)
         gen.generateBytes(masterPasswordUtf8, out, 0, KEY_LEN)
+
         return out
     }
 
-    data class EncResult(val nonce: ByteArray, val ciphertext: ByteArray)
+    data class EncResult(
+        val nonce: ByteArray,
+        val ciphertext: ByteArray
+    )
 
     fun encrypt(key: ByteArray, plaintext: ByteArray): EncResult {
         require(key.size == KEY_LEN) { "key must be 32 bytes" }
@@ -61,6 +64,7 @@ object VaultCrypto {
             SecretKeySpec(key, "AES"),
             GCMParameterSpec(GCM_TAG_BITS, nonce)
         )
+
         val ct = cipher.doFinal(plaintext)
         return EncResult(nonce, ct)
     }
@@ -73,10 +77,9 @@ object VaultCrypto {
             SecretKeySpec(key, "AES"),
             GCMParameterSpec(GCM_TAG_BITS, nonce)
         )
+
         return cipher.doFinal(ciphertext)
     }
-
-    // JSON envelope compatible with your Python format
     private fun makeContainer(salt: ByteArray, nonce: ByteArray, ct: ByteArray): JSONObject {
         val kdf = JSONObject()
             .put("type", "argon2id")
@@ -84,6 +87,7 @@ object VaultCrypto {
             .put("memory_kib", ARGON_MEMORY_KIB)
             .put("parallelism", ARGON_PARALLELISM)
             .put("salt", b64enc(salt))
+
         return JSONObject()
             .put("version", 1)
             .put("kdf", kdf)
@@ -91,10 +95,10 @@ object VaultCrypto {
             .put("entries_ciphertext", b64enc(ct))
             .put("created_at", Instant.now().toString())
     }
-
     private fun readAllText(cr: ContentResolver, uri: Uri): String {
         cr.openInputStream(uri).use { input ->
             requireNotNull(input) { "Cannot open input stream for $uri" }
+
             BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).use { br ->
                 val sb = StringBuilder()
                 var line: String?
@@ -116,21 +120,15 @@ object VaultCrypto {
         }
     }
 
-    // --------- Public API: create vault file ----------
     fun createVaultFile(context: Context, uri: Uri, masterPassword: String) {
         val salt = ByteArray(16)
         SecureRandom().nextBytes(salt)
-
-        // work with explicit byte array so we can zero it after use
         val pwBytes = masterPassword.toByteArray(StandardCharsets.UTF_8)
         val key = deriveKey(pwBytes, salt)
-
         val entriesPlain = "[]".toByteArray(StandardCharsets.UTF_8)
         val enc = encrypt(key, entriesPlain)
         val container = makeContainer(salt, enc.nonce, enc.ciphertext)
         writeAllText(context.contentResolver, uri, container.toString(2))
-
-        // 🔒 zero sensitive arrays
         try {
             pwBytes.fill(0)
             key.fill(0)
@@ -138,49 +136,47 @@ object VaultCrypto {
             enc.nonce.fill(0)
             enc.ciphertext.fill(0)
             entriesPlain.fill(0)
-        } catch (_: Exception) { /* ignore */ }
+        } catch (_: Exception) {}
     }
 
-    // --------- Session ----------
-    class VaultSession(private val context: Context, private val uri: Uri) {
+    class VaultSession(
+        private val context: Context,
+        private val uri: Uri
+    ) {
         var container: JSONObject? = null
             private set
+
         var entries: MutableList<JSONObject> = mutableListOf()
             private set
+
         private var key: ByteArray? = null
+
         var unlocked: Boolean = false
             private set
 
         fun unlock(masterPassword: String) {
-            // load container
             val text = readAllText(context.contentResolver, uri)
             val obj = JSONObject(text)
-
             val kdf = obj.getJSONObject("kdf")
             val salt = b64dec(kdf.getString("salt"))
             val nonce = b64dec(obj.getString("nonce"))
             val ct = b64dec(obj.getString("entries_ciphertext"))
-
-            // derive with explicit password bytes so we can wipe them
             val pwBytes = masterPassword.toByteArray(StandardCharsets.UTF_8)
             val derived = deriveKey(pwBytes, salt)
             val pt = decrypt(derived, nonce, ct)
             val arr = JSONArray(String(pt, StandardCharsets.UTF_8))
-
-            // set state
             container = obj
             entries = MutableList(arr.length()) { i -> arr.getJSONObject(i) }
             key = derived
             unlocked = true
 
-            // 🔒 zero temporaries (do not zero 'derived' because it's the live key)
             try {
                 pwBytes.fill(0)
                 pt.fill(0)
                 salt.fill(0)
                 nonce.fill(0)
                 ct.fill(0)
-            } catch (_: Exception) { }
+            } catch (_: Exception) {}
         }
 
         fun addEntry(hostname: String, username: String, password: String) {
@@ -191,6 +187,7 @@ object VaultCrypto {
                 .put("username", username)
                 .put("password", password)
                 .put("created_at", Instant.now().toString())
+
             entries.add(entry)
         }
 
@@ -203,24 +200,21 @@ object VaultCrypto {
             check(unlocked && key != null && container != null) { "Vault is not unlocked" }
             val plaintext = JSONArray(entries).toString().toByteArray(StandardCharsets.UTF_8)
             val enc = encrypt(key!!, plaintext)
-
             container!!.put("nonce", b64enc(enc.nonce))
             container!!.put("entries_ciphertext", b64enc(enc.ciphertext))
             container!!.put("modified_at", Instant.now().toString())
-
             writeAllText(context.contentResolver, uri, container!!.toString(2))
-
-            // 🔒 zero temporaries
             try {
                 plaintext.fill(0)
                 enc.nonce.fill(0)
                 enc.ciphertext.fill(0)
-            } catch (_: Exception) { }
+            } catch (_: Exception) {}
         }
 
         fun lock() {
-            // 🔒 wipe live key bytes before dropping references
-            try { key?.fill(0) } catch (_: Exception) { }
+            try {
+                key?.fill(0)
+            } catch (_: Exception) {}
             key = null
             entries.clear()
             container = null

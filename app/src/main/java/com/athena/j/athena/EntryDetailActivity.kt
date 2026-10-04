@@ -20,153 +20,51 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-
-/**
- * Displays a credential and protects sensitive actions
- * with biometric or master-password authentication.
- */
 class EntryDetailActivity : BaseSecureActivity() {
 
     companion object {
-
-        private const val TAG =
-            "AthenaEntry"
+        private const val TAG = "AthenaEntry"
     }
-
-    // =============================================================
-    // AUTHENTICATED ACTIONS
-    // =============================================================
-
     private enum class SensitiveAction {
         REVEAL,
         COPY,
         EDIT,
         DELETE
     }
-
-    // =============================================================
-    // VAULT
-    // =============================================================
-
-    private var vaultUri: Uri? =
-        null
-
-    private var entryIndex: Int =
-        -1
-
-    // =============================================================
-    // ENTRY METADATA
-    // =============================================================
-
-    private var hostname: String =
-        ""
-
-    private var username: String =
-        ""
-
-    private var created: Long =
-        0L
-
-    private var updated: Long =
-        0L
-
-    // =============================================================
-    // UI
-    // =============================================================
-
+    private var vaultUri: Uri? = null
+    private var entryIndex: Int = -1
+    private var hostname: String = ""
+    private var username: String = ""
+    private var created: Long = 0L
+    private var updated: Long = 0L
     private lateinit var toolbar: MaterialToolbar
     private lateinit var entryTitle: TextView
     private lateinit var usernameField: TextView
     private lateinit var passwordField: TextView
-
     private lateinit var eyeButton: ImageView
     private lateinit var copyButton: ImageView
     private lateinit var editButton: ImageView
     private lateinit var deleteButton: ImageView
 
-    // =============================================================
-    // STATE
-    // =============================================================
+    private var authInProgress = false
+    private var passwordVisible = false
 
-    private var authInProgress =
-        false
-
-    private var passwordVisible =
-        false
-
-    // =============================================================
-    // CREATE
-    // =============================================================
-
-    override fun onCreate(
-        savedInstanceState: Bundle?
-    ) {
-
-        super.onCreate(
-            savedInstanceState
-        )
-
-        setContentView(
-            R.layout.activity_entry_detail
-        )
-
-        // Resolve active vault.
-        vaultUri =
-            intent
-                .getStringExtra(
-                    "vaultUri"
-                )
-                ?.let {
-                    Uri.parse(
-                        it
-                    )
-                }
-                ?: VaultRuntimeSession
-                    .getVaultUri()
-
-        entryIndex =
-            intent.getIntExtra(
-                "entryIndex",
-                -1
-            )
-
-        if (
-            vaultUri == null ||
-            entryIndex < 0
-        ) {
-
-            Toast.makeText(
-                this,
-                "Invalid vault entry",
-                Toast.LENGTH_LONG
-            ).show()
-
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_entry_detail)
+        vaultUri = intent.getStringExtra("vaultUri")?.let { Uri.parse(it) }
+            ?: VaultRuntimeSession.getVaultUri()
+        entryIndex = intent.getIntExtra("entryIndex", -1)
+        if (vaultUri == null || entryIndex < 0) {
+            Toast.makeText(this, "Invalid vault entry", Toast.LENGTH_LONG).show()
             finish()
             return
         }
 
-        // Load non-sensitive metadata passed by VaultActivity.
-        hostname =
-            intent.getStringExtra(
-                "hostname"
-            ) ?: "Unknown"
-
-        username =
-            intent.getStringExtra(
-                "username"
-            ) ?: ""
-
-        created =
-            intent.getLongExtra(
-                "created",
-                0L
-            )
-
-        updated =
-            intent.getLongExtra(
-                "updated",
-                0L
-            )
+        hostname = intent.getStringExtra("hostname") ?: "Unknown"
+        username = intent.getStringExtra("username") ?: ""
+        created = intent.getLongExtra("created", 0L)
+        updated = intent.getLongExtra("updated", 0L)
 
         setupViews()
         setupToolbar()
@@ -174,965 +72,410 @@ class EntryDetailActivity : BaseSecureActivity() {
         setupActions()
     }
 
-    // =============================================================
-    // VIEWS
-    // =============================================================
-
     private fun setupViews() {
-
-        toolbar =
-            findViewById(
-                R.id.toolbar
-            )
-
-        entryTitle =
-            findViewById(
-                R.id.entryTitle
-            )
-
-        usernameField =
-            findViewById(
-                R.id.usernameField
-            )
-
-        passwordField =
-            findViewById(
-                R.id.passwordField
-            )
-
-        eyeButton =
-            findViewById(
-                R.id.eyeButton
-            )
-
-        copyButton =
-            findViewById(
-                R.id.copyButton
-            )
-
-        editButton =
-            findViewById(
-                R.id.editButton
-            )
-
-        deleteButton =
-            findViewById(
-                R.id.deleteButton
-            )
+        toolbar = findViewById(R.id.toolbar)
+        entryTitle = findViewById(R.id.entryTitle)
+        usernameField = findViewById(R.id.usernameField)
+        passwordField = findViewById(R.id.passwordField)
+        eyeButton = findViewById(R.id.eyeButton)
+        copyButton = findViewById(R.id.copyButton)
+        editButton = findViewById(R.id.editButton)
+        deleteButton = findViewById(R.id.deleteButton)
     }
-
-    // =============================================================
-    // TOOLBAR
-    // =============================================================
 
     private fun setupToolbar() {
-
-        setSupportActionBar(
-            toolbar
-        )
-
-        toolbar
-            .setNavigationOnClickListener {
-
-                finish()
-            }
+        setSupportActionBar(toolbar)
+        toolbar.setNavigationOnClickListener { finish() }
     }
-
-    // =============================================================
-    // MASKED UI
-    // =============================================================
 
     private fun showMaskedLayout() {
+        passwordVisible = false
+        entryTitle.text = hostname
+        usernameField.text = username
+        passwordField.transformationMethod = null
+        passwordField.text = "••••••••••••"
+        eyeButton.setImageResource(R.drawable.ic_eye_closed)
+        eyeButton.contentDescription = "Show password"
 
-        passwordVisible =
-            false
+        findViewById<TextView>(R.id.createdText).text =
+            "Created: ${if (created > 0L) formatTimestamp(created) else "N/A"}"
 
-        entryTitle.text =
-            hostname
-
-        usernameField.text =
-            username
-
-        passwordField.transformationMethod =
-            null
-
-        passwordField.text =
-            "••••••••••••"
-
-        findViewById<TextView>(
-            R.id.createdText
-        ).text =
-            "Created: ${
-                if (created > 0L) {
-                    formatTimestamp(
-                        created
-                    )
-                } else {
-                    "N/A"
-                }
-            }"
-
-        findViewById<TextView>(
-            R.id.editedText
-        ).text =
-            "Last edited: ${
-                if (updated > 0L) {
-                    formatTimestamp(
-                        updated
-                    )
-                } else {
-                    "N/A"
-                }
-            }"
+        findViewById<TextView>(R.id.editedText).text =
+            "Last edited: ${if (updated > 0L) formatTimestamp(updated) else "N/A"}"
     }
-
-    // =============================================================
-    // ACTION BUTTONS
-    // =============================================================
 
     private fun setupActions() {
-
-        eyeButton
-            .setOnClickListener {
-
-                if (
-                    passwordVisible
-                ) {
-
-                    // Hiding does not require authentication.
-                    showMaskedLayout()
-
-                } else {
-
-                    authenticateFor(
-                        SensitiveAction.REVEAL
-                    )
-                }
+        eyeButton.setOnClickListener {
+            if (passwordVisible) {
+                showMaskedLayout()
+            } else {
+                authenticateFor(SensitiveAction.REVEAL)
             }
+        }
 
-        copyButton
-            .setOnClickListener {
-
-                authenticateFor(
-                    SensitiveAction.COPY
-                )
-            }
-
-        editButton
-            .setOnClickListener {
-
-                authenticateFor(
-                    SensitiveAction.EDIT
-                )
-            }
-
-        deleteButton
-            .setOnClickListener {
-
-                showDeleteConfirmation()
-            }
+        copyButton.setOnClickListener { authenticateFor(SensitiveAction.COPY) }
+        editButton.setOnClickListener { authenticateFor(SensitiveAction.EDIT) }
+        deleteButton.setOnClickListener { showDeleteConfirmation() }
     }
 
-    // =============================================================
-    // DELETE CONFIRMATION
-    // =============================================================
-
     private fun showDeleteConfirmation() {
+        val view = layoutInflater.inflate(R.layout.dialog_delete_confirm, null)
+        val cancelButton = view.findViewById<TextView>(R.id.cancelButton)
+        val yesButton = view.findViewById<TextView>(R.id.yesButton)
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this, R.style.AthenaDialogTheme)
+            .setView(view)
+            .setCancelable(true)
+            .create()
 
-        val view =
-            layoutInflater.inflate(
-                R.layout.dialog_delete_confirm,
-                null
-            )
-
-        val cancelButton =
-            view.findViewById<TextView>(
-                R.id.cancelButton
-            )
-
-        val yesButton =
-            view.findViewById<TextView>(
-                R.id.yesButton
-            )
-
-        val dialog =
-            androidx.appcompat.app.AlertDialog
-                .Builder(
-                    this,
-                    R.style.AthenaDialogTheme
-                )
-                .setView(
-                    view
-                )
-                .setCancelable(
-                    true
-                )
-                .create()
-
-        cancelButton
-            .setOnClickListener {
-
-                dialog.dismiss()
-            }
-
-        yesButton
-            .setOnClickListener {
-
-                dialog.dismiss()
-
-                authenticateFor(
-                    SensitiveAction.DELETE
-                )
-            }
+        cancelButton.setOnClickListener { dialog.dismiss() }
+        yesButton.setOnClickListener {
+            dialog.dismiss()
+            authenticateFor(SensitiveAction.DELETE)
+        }
 
         dialog.show()
     }
 
-    // =============================================================
-    // AUTHENTICATION
-    // =============================================================
-
-    private fun authenticateFor(
-        action: SensitiveAction
-    ) {
-
-        if (
-            authInProgress
-        ) {
-
-            return
-        }
-
-        if (
-            vaultUri == null ||
-            !VaultRuntimeSession.isUnlocked()
-        ) {
-
+    private fun authenticateFor(action: SensitiveAction) {
+        if (authInProgress) return
+        if (vaultUri == null || !VaultRuntimeSession.isUnlocked()) {
             handleExpiredSession()
             return
         }
 
-        authInProgress =
-            true
-
-        if (
-            biometricAuthenticationAvailable()
-        ) {
-
-            authenticateWithBiometrics(
-                action
-            )
-
+        authInProgress = true
+        if (biometricAuthenticationAvailable()) {
+            authenticateWithBiometrics(action)
         } else {
-
-            authInProgress =
-                false
-
-            authenticateWithMasterPassword(
-                action
-            )
+            authInProgress = false
+            authenticateWithMasterPassword(action)
         }
     }
-
-    // =============================================================
-    // BIOMETRIC AVAILABILITY
-    // =============================================================
 
     private fun biometricAuthenticationAvailable(): Boolean {
-
-        return (
-                BiometricStore
-                    .isBiometricAvailable(
-                        this
-                    ) &&
-                        BiometricStore
-                            .hasWrappedDek(
-                                this
-                            ) &&
-                        VaultSessionManager
-                            .isBiometricEnabled(
-                                this
-                            )
-                )
+        return BiometricStore.isBiometricAvailable(this) &&
+                BiometricStore.hasWrappedDek(this) &&
+                VaultSessionManager.isBiometricEnabled(this)
     }
 
-    // =============================================================
-    // BIOMETRIC AUTH
-    // =============================================================
-
-    private fun authenticateWithBiometrics(
-        action: SensitiveAction
-    ) {
-
-        val iv =
-            BiometricStore
-                .getStoredIv(
-                    this
-                )
-
-        if (
-            iv == null
-        ) {
-
-            authInProgress =
-                false
-
-            authenticateWithMasterPassword(
-                action
-            )
-
+    private fun authenticateWithBiometrics(action: SensitiveAction) {
+        val iv = BiometricStore.getStoredIv(this)
+        if (iv == null) {
+            authInProgress = false
+            authenticateWithMasterPassword(action)
             return
         }
 
-        val cipher =
-            BiometricStore
-                .initDecryptCipher(
-                    iv
-                )
-
-        iv.fill(
-            0
-        )
-
-        if (
-            cipher == null
-        ) {
-
-            authInProgress =
-                false
-
-            authenticateWithMasterPassword(
-                action
-            )
-
+        val cipher = BiometricStore.initDecryptCipher(iv)
+        iv.fill(0)
+        if (cipher == null) {
+            authInProgress = false
+            authenticateWithMasterPassword(action)
             return
         }
 
-        val prompt =
-            BiometricPrompt(
-                this,
-                mainExecutor,
-                object :
-                    BiometricPrompt.AuthenticationCallback() {
-
-                    override fun onAuthenticationSucceeded(
-                        result:
-                        BiometricPrompt.AuthenticationResult
-                    ) {
-
-                        authInProgress =
-                            false
-
-                        val cryptoCipher =
-                            result
-                                .cryptoObject
-                                ?.cipher
-
-                        if (
-                            cryptoCipher == null
-                        ) {
-
-                            centeredToast(
-                                "Biometric authentication failed"
-                            )
-
-                            return
-                        }
-
-                        val dek =
-                            BiometricStore
-                                .unwrapDek(
-                                    this@EntryDetailActivity,
-                                    cryptoCipher
-                                )
-
-                        if (
-                            dek == null
-                        ) {
-
-                            centeredToast(
-                                "Biometric authentication failed"
-                            )
-
-                            return
-                        }
-
-                        handleAuthenticatedDek(
-                            dek,
-                            action
-                        )
+        val prompt = BiometricPrompt(
+            this,
+            mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(
+                    result: BiometricPrompt.AuthenticationResult
+                ) {
+                    authInProgress = false
+                    val cryptoCipher = result.cryptoObject?.cipher
+                    if (cryptoCipher == null) {
+                        centeredToast("Biometric authentication failed")
+                        return
                     }
-
-                    override fun onAuthenticationError(
-                        errorCode: Int,
-                        errString: CharSequence
-                    ) {
-
-                        authInProgress =
-                            false
-
-                        // Negative button falls back to password.
-                        if (
-                            errorCode ==
-                            BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                        ) {
-
-                            authenticateWithMasterPassword(
-                                action
-                            )
-                        }
+                    val dek = BiometricStore.unwrapDek(
+                        this@EntryDetailActivity,
+                        cryptoCipher
+                    )
+                    if (dek == null) {
+                        centeredToast("Biometric authentication failed")
+                        return
                     }
+                    handleAuthenticatedDek(dek, action)
+                }
 
-                    override fun onAuthenticationFailed() {
+                override fun onAuthenticationError(
+                    errorCode: Int,
+                    errString: CharSequence
+                ) {
+                    authInProgress = false
 
-                        // Keep the biometric prompt active.
+                    if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
+                        authenticateWithMasterPassword(action)
                     }
                 }
-            )
+                override fun onAuthenticationFailed() {}
+            }
+        )
 
-        val promptInfo =
-            BiometricPrompt.PromptInfo
-                .Builder()
-                .setTitle(
-                    actionTitle(
-                        action
-                    )
-                )
-                .setSubtitle(
-                    "Authenticate to continue"
-                )
-                .setAllowedAuthenticators(
-                    BiometricManager
-                        .Authenticators
-                        .BIOMETRIC_STRONG
-                )
-                .setNegativeButtonText(
-                    "Use password"
-                )
-                .build()
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(actionTitle(action))
+            .setSubtitle("Authenticate to continue")
+            .setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG
+            )
+            .setNegativeButtonText("Use password")
+            .build()
 
         prompt.authenticate(
             promptInfo,
-            BiometricPrompt.CryptoObject(
-                cipher
-            )
+            BiometricPrompt.CryptoObject(cipher)
         )
     }
 
-    // =============================================================
-    // MASTER PASSWORD AUTH
-    // =============================================================
-
-    private fun authenticateWithMasterPassword(
-        action: SensitiveAction
-    ) {
-
-        val uri =
-            vaultUri
-                ?: return
-
+    private fun authenticateWithMasterPassword(action: SensitiveAction) {
+        val uri = vaultUri ?: return
         showMasterPasswordDialog(
-            title =
-                actionTitle(
-                    action
-                ),
-            subtitle =
-                "Re-enter your master password to continue.",
-            positiveLabel =
-                actionPositiveLabel(
-                    action
-                )
+            title = actionTitle(action),
+            subtitle = "Re-enter your master password to continue.",
+            positiveLabel = actionPositiveLabel(action)
         ) { password ->
 
-            // Argon2 work stays off the UI thread.
-            lifecycleScope.launch(
-                Dispatchers.IO
-            ) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                var vaultId: ByteArray? = null
+                var recoveryKey: ByteArray? = null
+                var recoveryKeyUnavailable = false
 
-                val dek =
-                    try {
-
-                        VaultManager
-                            .deriveVaultKey(
-                                this@EntryDetailActivity,
-                                uri,
-                                password
-                            )
-
-                    } catch (e: Exception) {
-
-                        Log.w(
-                            TAG,
-                            "Password authentication failed",
-                            e
-                        )
-
+                val dek = try {
+                    vaultId = VaultManager.getVaultId(
+                        context = this@EntryDetailActivity,
+                        uri = uri
+                    )
+                    if (vaultId == null) {
                         null
+                    } else {
+                        recoveryKey = RecoveryKeyStore.load(
+                            context = this@EntryDetailActivity,
+                            vaultId = vaultId
+                        )
+                        if (recoveryKey == null) {
+                            recoveryKeyUnavailable = true
+                            null
+                        } else {
+                            VaultManager.deriveVaultKey(
+                                context = this@EntryDetailActivity,
+                                uri = uri,
+                                password = password,
+                                recoveryKey = recoveryKey
+                            )
+                        }
                     }
 
-                withContext(
-                    Dispatchers.Main
-                ) {
+                } catch (e: Exception) {
+                    Log.w(TAG, "Password authentication failed", e)
+                    null
 
-                    if (
-                        dek == null
-                    ) {
-
-                        centeredToast(
-                            "Incorrect master password"
-                        )
-
+                } finally {
+                    recoveryKey?.fill(0)
+                    vaultId?.fill(0)
+                }
+                withContext(Dispatchers.Main) {
+                    if (dek == null) {
+                        if (recoveryKeyUnavailable) {
+                            centeredToast(
+                                "Recovery key unavailable. Lock and unlock the vault again."
+                            )
+                        } else {
+                            centeredToast("Incorrect master password")
+                        }
                     } else {
-
-                        handleAuthenticatedDek(
-                            dek,
-                            action
-                        )
+                        handleAuthenticatedDek(dek, action)
                     }
                 }
             }
         }
     }
-
-    // =============================================================
-    // AUTHENTICATED ACTION
-    // =============================================================
 
     private fun handleAuthenticatedDek(
         dek: ByteArray,
         action: SensitiveAction
     ) {
-
-        val uri =
-            vaultUri
-
-        if (
-            uri == null
-        ) {
-
-            dek.fill(
-                0
-            )
-
+        val uri = vaultUri
+        if (uri == null) {
+            dek.fill(0)
             handleExpiredSession()
             return
         }
-
-        lifecycleScope.launch(
-            Dispatchers.IO
-        ) {
-
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
-
-                // Verify the DEK against the selected vault.
-                val vault =
-                    VaultManager
-                        .loadVaultWithKey(
-                            this@EntryDetailActivity,
-                            uri,
-                            dek
-                        )
-                        ?: throw SecurityException(
-                            "Vault authentication failed"
-                        )
-
-                if (
-                    entryIndex < 0 ||
-                    entryIndex >= vault.length()
-                ) {
-
+                val vault = VaultManager.loadVaultWithKey(
+                    this@EntryDetailActivity,
+                    uri,
+                    dek
+                ) ?: throw SecurityException(
+                    "Vault authentication failed"
+                )
+                if (entryIndex < 0 || entryIndex >= vault.length()) {
                     throw IndexOutOfBoundsException(
                         "Credential no longer exists"
                     )
                 }
-
-                val entry =
-                    vault.optJSONObject(
-                        entryIndex
+                val entry = vault.optJSONObject(entryIndex)
+                    ?: throw IllegalStateException(
+                        "Credential is invalid"
                     )
-                        ?: throw IllegalStateException(
-                            "Credential is invalid"
-                        )
 
-                when (
-                    action
-                ) {
-
+                when (action) {
                     SensitiveAction.REVEAL -> {
+                        val loaded = readCredential(entry)
 
-                        val loaded =
-                            readCredential(
-                                entry
-                            )
-
-                        withContext(
-                            Dispatchers.Main
-                        ) {
-
-                            revealCredential(
-                                loaded
-                            )
+                        withContext(Dispatchers.Main) {
+                            revealCredential(loaded)
                         }
                     }
 
                     SensitiveAction.COPY -> {
+                        val password = entry.optString(
+                            "password",
+                            ""
+                        )
 
-                        val password =
-                            entry.optString(
-                                "password",
-                                ""
-                            )
-
-                        if (
-                            password.isEmpty()
-                        ) {
-
+                        if (password.isEmpty()) {
                             throw IllegalStateException(
                                 "Password is missing"
                             )
                         }
-
-                        withContext(
-                            Dispatchers.Main
-                        ) {
-
+                        withContext(Dispatchers.Main) {
                             ClipboardUtils.copySensitive(
-                                context =
-                                    this@EntryDetailActivity,
-                                label =
-                                    "Password",
-                                text =
-                                    password,
-                                clearAfterMs =
-                                    30_000L
+                                context = this@EntryDetailActivity,
+                                label = "Password",
+                                text = password,
+                                clearAfterMs = 30_000L
                             ) {
-
-                                centeredToast(
-                                    "Clipboard cleared"
-                                )
+                                centeredToast("Clipboard cleared")
                             }
 
-                            centeredToast(
-                                "Password copied"
-                            )
+                            centeredToast("Password copied")
                         }
                     }
 
                     SensitiveAction.EDIT -> {
-
-                        // Edit screen reloads the entry by vault index.
-                        withContext(
-                            Dispatchers.Main
-                        ) {
-
+                        withContext(Dispatchers.Main) {
                             openEditEntry()
                         }
                     }
 
                     SensitiveAction.DELETE -> {
+                        vault.remove(entryIndex)
 
-                        // Remove the exact vault-array entry.
-                        vault.remove(
-                            entryIndex
+                        VaultManager.saveVaultWithKey(
+                            this@EntryDetailActivity,
+                            uri,
+                            vault,
+                            dek
                         )
+                        withContext(Dispatchers.Main) {
+                            centeredToast("Entry deleted")
 
-                        VaultManager
-                            .saveVaultWithKey(
-                                this@EntryDetailActivity,
-                                uri,
-                                vault,
-                                dek
-                            )
+                            val result = Intent().apply {
+                                putExtra("entryDeleted", true)
+                            }
 
-                        withContext(
-                            Dispatchers.Main
-                        ) {
-
-                            centeredToast(
-                                "Entry deleted"
-                            )
-
-                            val result =
-                                Intent().apply {
-
-                                    putExtra(
-                                        "entryDeleted",
-                                        true
-                                    )
-                                }
-
-                            setResult(
-                                RESULT_OK,
-                                result
-                            )
-
+                            setResult(RESULT_OK, result)
                             finish()
                         }
                     }
                 }
 
             } catch (e: Exception) {
-
-                Log.e(
-                    TAG,
-                    "Sensitive credential operation failed",
-                    e
-                )
-
-                withContext(
-                    Dispatchers.Main
-                ) {
-
-                    centeredToast(
-                        "Unable to complete operation"
-                    )
+                Log.e(TAG, "Sensitive credential operation failed", e)
+                withContext(Dispatchers.Main) {
+                    centeredToast("Unable to complete operation")
                 }
 
             } finally {
-
-                // Destroy temporary DEK copy.
-                dek.fill(
-                    0
-                )
+                dek.fill(0)
             }
         }
     }
 
-    // =============================================================
-    // READ ENTRY
-    // =============================================================
-
-    private fun readCredential(
-        entry: JSONObject
-    ): LoadedCredential {
-
-        val loadedHostname =
-            entry.optString(
-                "hostname",
-                hostname
-            )
-
-        val loadedUsername =
-            entry.optString(
-                "username",
-                username
-            )
-
-        val loadedPassword =
-            entry.optString(
-                "password",
-                ""
-            )
-
-        if (
-            loadedPassword.isEmpty()
-        ) {
-
+    private fun readCredential(entry: JSONObject): LoadedCredential {
+        val loadedHostname = entry.optString("hostname", hostname)
+        val loadedUsername = entry.optString("username", username)
+        val loadedPassword = entry.optString("password", "")
+        if (loadedPassword.isEmpty()) {
             throw IllegalStateException(
                 "Credential password is missing"
             )
         }
 
         return LoadedCredential(
-            hostname =
-                loadedHostname,
-            username =
-                loadedUsername,
-            password =
-                loadedPassword,
-            created =
-                entry.optLong(
-                    "created",
-                    created
-                ),
-            updated =
-                entry.optLong(
-                    "updated",
-                    updated
-                )
+            hostname = loadedHostname,
+            username = loadedUsername,
+            password = loadedPassword,
+            created = entry.optLong("created", created),
+            updated = entry.optLong("updated", updated)
         )
     }
 
-    // =============================================================
-    // REVEAL
-    // =============================================================
-
-    private fun revealCredential(
-        credential: LoadedCredential
-    ) {
-
-        hostname =
-            credential.hostname
-
-        username =
-            credential.username
-
-        created =
-            credential.created
-
-        updated =
-            credential.updated
-
-        entryTitle.text =
-            credential.hostname
-
-        usernameField.text =
-            credential.username
-
-        // Show authenticated plaintext password.
-        passwordField.transformationMethod =
-            null
-
-        passwordField.text =
-            credential.password
-
+    private fun revealCredential(credential: LoadedCredential) {
+        hostname = credential.hostname
+        username = credential.username
+        created = credential.created
+        updated = credential.updated
+        entryTitle.text = credential.hostname
+        usernameField.text = credential.username
+        passwordField.transformationMethod = null
+        passwordField.text = credential.password
         passwordField.invalidate()
-
-        findViewById<TextView>(
-            R.id.createdText
-        ).text =
-            "Created: ${
-                if (created > 0L) {
-                    formatTimestamp(
-                        created
-                    )
-                } else {
-                    "N/A"
-                }
-            }"
-
-        findViewById<TextView>(
-            R.id.editedText
-        ).text =
-            "Last edited: ${
-                if (updated > 0L) {
-                    formatTimestamp(
-                        updated
-                    )
-                } else {
-                    "N/A"
-                }
-            }"
-
-        passwordVisible =
-            true
-
-        centeredToast(
-            "Password revealed"
-        )
+        findViewById<TextView>(R.id.createdText).text =
+            "Created: ${if (created > 0L) formatTimestamp(created) else "N/A"}"
+        findViewById<TextView>(R.id.editedText).text =
+            "Last edited: ${if (updated > 0L) formatTimestamp(updated) else "N/A"}"
+        passwordVisible = true
+        eyeButton.setImageResource(R.drawable.ic_eye_open)
+        eyeButton.contentDescription = "Hide password"
+        centeredToast("Password revealed")
     }
-
-    // =============================================================
-    // OPEN EDIT SCREEN
-    // =============================================================
 
     private fun openEditEntry() {
+        val uri = vaultUri ?: return
+        val editIntent = Intent(
+            this,
+            EditEntryActivity::class.java
+        ).apply {
+            putExtra("vaultUri", uri.toString())
+            putExtra("entryIndex", entryIndex)
+        }
 
-        val uri =
-            vaultUri
-                ?: return
-
-        val editIntent =
-            Intent(
-                this,
-                EditEntryActivity::class.java
-            ).apply {
-
-                putExtra(
-                    "vaultUri",
-                    uri.toString()
-                )
-
-                putExtra(
-                    "entryIndex",
-                    entryIndex
-                )
-            }
-
-        startActivity(
-            editIntent
-        )
-
+        startActivity(editIntent)
         pushSlideTransition()
     }
 
-    // =============================================================
-    // AUTH UI TEXT
-    // =============================================================
-
-    private fun actionTitle(
-        action: SensitiveAction
-    ): String {
-
-        return when (
-            action
-        ) {
-
-            SensitiveAction.REVEAL ->
-                "Reveal password"
-
-            SensitiveAction.COPY ->
-                "Copy password"
-
-            SensitiveAction.EDIT ->
-                "Edit credential"
-
-            SensitiveAction.DELETE ->
-                "Delete credential"
+    private fun actionTitle(action: SensitiveAction): String {
+        return when (action) {
+            SensitiveAction.REVEAL -> "Reveal password"
+            SensitiveAction.COPY -> "Copy password"
+            SensitiveAction.EDIT -> "Edit credential"
+            SensitiveAction.DELETE -> "Delete credential"
         }
     }
 
-    private fun actionPositiveLabel(
-        action: SensitiveAction
-    ): String {
-
-        return when (
-            action
-        ) {
-
-            SensitiveAction.REVEAL ->
-                "Reveal"
-
-            SensitiveAction.COPY ->
-                "Copy"
-
-            SensitiveAction.EDIT ->
-                "Continue"
-
-            SensitiveAction.DELETE ->
-                "Delete"
+    private fun actionPositiveLabel(action: SensitiveAction): String {
+        return when (action) {
+            SensitiveAction.REVEAL -> "Reveal"
+            SensitiveAction.COPY -> "Copy"
+            SensitiveAction.EDIT -> "Continue"
+            SensitiveAction.DELETE -> "Delete"
         }
     }
-
-    // =============================================================
-    // SESSION EXPIRED
-    // =============================================================
 
     private fun handleExpiredSession() {
-
         VaultRuntimeSession.clear()
-
-        centeredToast(
-            "Vault session expired. Unlock again."
-        )
-
+        centeredToast("Vault session expired. Unlock again.")
         finish()
     }
 
-    // =============================================================
-    // TOAST
-    // =============================================================
-
-    private fun centeredToast(
-        message: String
-    ) {
-
+    private fun centeredToast(message: String) {
         Toast.makeText(
             this,
             message,
             Toast.LENGTH_SHORT
         ).apply {
-
             setGravity(
                 Gravity.CENTER,
                 0,
@@ -1143,48 +486,28 @@ class EntryDetailActivity : BaseSecureActivity() {
         }
     }
 
-    // =============================================================
-    // DATE
-    // =============================================================
-
-    private fun formatTimestamp(
-        timestamp: Long
-    ): String {
-
+    private fun formatTimestamp(timestamp: Long): String {
         return SimpleDateFormat(
             "dd MMM yyyy, HH:mm",
             Locale.getDefault()
         ).format(
-            Date(
-                timestamp
-            )
+            Date(timestamp)
         )
     }
 
-    // =============================================================
-    // SENSITIVE UI CLEANUP
-    // =============================================================
-
     override fun clearSensitiveData() {
-
-        if (
-            ::passwordField.isInitialized
-        ) {
-
-            passwordField.transformationMethod =
-                null
-
-            passwordField.text =
-                "••••••••••••"
+        if (::passwordField.isInitialized) {
+            passwordField.transformationMethod = null
+            passwordField.text = "••••••••••••"
         }
 
-        passwordVisible =
-            false
-    }
+        if (::eyeButton.isInitialized) {
+            eyeButton.setImageResource(R.drawable.ic_eye_closed)
+            eyeButton.contentDescription = "Show password"
+        }
 
-    // =============================================================
-    // INTERNAL MODEL
-    // =============================================================
+        passwordVisible = false
+    }
 
     private data class LoadedCredential(
         val hostname: String,

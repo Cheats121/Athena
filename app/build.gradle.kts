@@ -133,6 +133,12 @@ dependencies {
     implementation(
         "androidx.documentfile:documentfile:1.0.1"
     )
+    // =============================================================
+    // Passoword Requirement
+    // =============================================================
+
+    implementation(
+        "com.nulab-inc:zxcvbn:1.9.0")
 
     // =============================================================
     // TESTING

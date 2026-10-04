@@ -15,284 +15,110 @@ import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import javax.crypto.Cipher
+import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * Athena Vault Format v3
- *
- * Password:
- *
- *      master password
- *            ↓
- *        Argon2id
- *            ↓
- *       256-bit KEK
- *            ↓
- *      unwrap random DEK
- *
- *
- * Vault data:
- *
- *      random 256-bit DEK
- *            ↓
- *       AES-256-GCM
- *            ↓
- *      encrypted vault
- *
- *
- * The DEK is random and independent of the master password.
- *
- * Changing the master password therefore only requires
- * re-wrapping the DEK, not re-encrypting every vault entry.
- *
- * There is intentionally:
- *
- * - no AES-CBC
- * - no legacy v1/v2 support
- * - no redundant HMAC
- *
- * AES-GCM provides authenticated encryption.
- */
 object VaultManager {
 
     private const val TAG = "AthenaVault"
-
-    // =============================================================
-    // FORMAT
-    // =============================================================
-
-    private const val FORMAT_NAME =
-        "athena-vault"
-
-    private const val FORMAT_VERSION =
-        3
-
-    private const val KDF_NAME =
-        "argon2id"
-
-    private const val CIPHER_NAME =
-        "aes-256-gcm"
-
-    // =============================================================
-    // ARGON2ID
-    // =============================================================
-
-    /*
-     * Current creation parameters.
-     *
-     * 64 MiB memory
-     * 3 iterations
-     * 4 lanes
-     */
-    private const val ARGON_MEMORY_KIB =
-        65_536
-
-    private const val ARGON_ITERATIONS =
-        3
-
-    private const val ARGON_PARALLELISM =
-        4
-
-    /*
-     * Strict upper/lower bounds when reading vault files.
-     *
-     * Never blindly trust attacker-controlled KDF parameters.
-     */
-    private const val MIN_ARGON_MEMORY_KIB =
-        32_768
-
-    private const val MAX_ARGON_MEMORY_KIB =
-        262_144
-
-    private const val MIN_ARGON_ITERATIONS =
-        1
-
-    private const val MAX_ARGON_ITERATIONS =
-        10
-
-    private const val MIN_ARGON_PARALLELISM =
-        1
-
-    private const val MAX_ARGON_PARALLELISM =
-        8
-
-    // =============================================================
-    // CRYPTO SIZES
-    // =============================================================
-
-    private const val KEY_BYTES =
-        32
-
-    private const val SALT_BYTES =
-        16
-
-    private const val VAULT_ID_BYTES =
-        16
-
-    private const val GCM_NONCE_BYTES =
-        12
-
-    private const val GCM_TAG_BITS =
-        128
-
-    /*
-     * 32-byte DEK + 16-byte GCM tag.
-     */
-    private const val WRAPPED_DEK_BYTES =
-        KEY_BYTES + 16
-
-    // =============================================================
-    // FILE LIMITS
-    // =============================================================
-
-    /*
-     * Protect against malicious/corrupt files attempting
-     * to exhaust application memory.
-     */
-    private const val MAX_ENVELOPE_CHARS =
-        32 * 1024 * 1024
-
-    private const val MAX_VAULT_CIPHERTEXT_BYTES =
-        16 * 1024 * 1024
-
-    // =============================================================
-    // RANDOM
-    // =============================================================
-
-    private val secureRandom =
-        SecureRandom()
-
-    // =============================================================
-    // CREATE VAULT
-    // =============================================================
-
-    /**
-     * Creates a brand-new Athena v3 vault.
-     *
-     * This method:
-     *
-     * 1. creates a random vault identifier
-     * 2. creates a random 256-bit DEK
-     * 3. derives a password KEK using Argon2id
-     * 4. wraps the DEK using AES-GCM
-     * 5. encrypts an empty JSONArray using the DEK
-     */
+    private const val FORMAT_NAME = "athena-vault"
+    private const val FORMAT_VERSION = 4
+    private const val KDF_NAME = "argon2id"
+    private const val KDF_COMBINER_NAME = "hkdf-sha256"
+    private const val KDF_INFO = "ATHENA|V4|VAULT-KEK"
+    private const val CIPHER_NAME = "aes-256-gcm"
+    private const val HMAC_NAME = "HmacSHA256"
+    private const val ARGON_MEMORY_KIB = 65_536
+    private const val ARGON_ITERATIONS = 3
+    private const val ARGON_PARALLELISM = 4
+    private const val MIN_ARGON_MEMORY_KIB = 32_768
+    private const val MAX_ARGON_MEMORY_KIB = 262_144
+    private const val MIN_ARGON_ITERATIONS = 1
+    private const val MAX_ARGON_ITERATIONS = 10
+    private const val MIN_ARGON_PARALLELISM = 1
+    private const val MAX_ARGON_PARALLELISM = 8
+    private const val KEY_BYTES = 32
+    private const val RECOVERY_KEY_BYTES = 32
+    private const val SALT_BYTES = 16
+    private const val VAULT_ID_BYTES = 16
+    private const val GCM_NONCE_BYTES = 12
+    private const val GCM_TAG_BITS = 128
+    private const val WRAPPED_DEK_BYTES = KEY_BYTES + 16
+    private const val MAX_ENVELOPE_CHARS = 32 * 1024 * 1024
+    private const val MAX_VAULT_CIPHERTEXT_BYTES = 16 * 1024 * 1024
+    private val secureRandom = SecureRandom()
+    fun generateRecoveryKey(): ByteArray {
+        return randomBytes(RECOVERY_KEY_BYTES)
+    }
     fun createVault(
         context: Context,
         uri: Uri,
-        password: String
+        password: String,
+        recoveryKey: ByteArray
     ) {
+        require(password.isNotEmpty()) { "Master password cannot be empty" }
+        require(recoveryKey.size == RECOVERY_KEY_BYTES) { "Invalid recovery key size" }
+        val previousContents = readTextLimited(context, uri) ?: ""
+        val vaultId = randomBytes(VAULT_ID_BYTES)
+        val salt = randomBytes(SALT_BYTES)
+        val dek = randomBytes(KEY_BYTES)
+        val kek = deriveKek(
+            password = password,
+            recoveryKey = recoveryKey,
+            vaultId = vaultId,
+            salt = salt,
+            memoryKiB = ARGON_MEMORY_KIB,
+            iterations = ARGON_ITERATIONS,
+            parallelism = ARGON_PARALLELISM
+        )
 
-        require(
-            password.isNotEmpty()
-        ) {
-            "Master password cannot be empty"
-        }
+        val wrapNonce = randomBytes(GCM_NONCE_BYTES)
+        val dataNonce = randomBytes(GCM_NONCE_BYTES)
+        val emptyVaultPlaintext = JSONArray()
+            .toString()
+            .toByteArray(StandardCharsets.UTF_8)
 
-        val previousContents =
-            readTextLimited(
-                context,
-                uri
-            ) ?: ""
+        var wrappedDek: ByteArray? = null
+        var encryptedVault: ByteArray? = null
+        var wrapAad: ByteArray? = null
+        var dataAad: ByteArray? = null
 
-        val vaultId =
-            randomBytes(
-                VAULT_ID_BYTES
-            )
-
-        val salt =
-            randomBytes(
-                SALT_BYTES
-            )
-
-        val dek =
-            randomBytes(
-                KEY_BYTES
-            )
-
-        val kek =
-            deriveKek(
-                password = password,
+        try {
+            wrapAad = buildWrapAad(
+                vaultId = vaultId,
                 salt = salt,
                 memoryKiB = ARGON_MEMORY_KIB,
                 iterations = ARGON_ITERATIONS,
                 parallelism = ARGON_PARALLELISM
             )
 
-        val wrapNonce =
-            randomBytes(
-                GCM_NONCE_BYTES
+            wrappedDek = encryptGcm(
+                key = kek,
+                nonce = wrapNonce,
+                plaintext = dek,
+                aad = wrapAad
             )
 
-        val dataNonce =
-            randomBytes(
-                GCM_NONCE_BYTES
+            dataAad = buildVaultAad(vaultId)
+            encryptedVault = encryptGcm(
+                key = dek,
+                nonce = dataNonce,
+                plaintext = emptyVaultPlaintext,
+                aad = dataAad
             )
 
-        val emptyVaultPlaintext =
-            JSONArray()
-                .toString()
-                .toByteArray(
-                    StandardCharsets.UTF_8
-                )
-
-        var wrappedDek: ByteArray? =
-            null
-
-        var encryptedVault: ByteArray? =
-            null
-
-        var wrapAad: ByteArray? =
-            null
-
-        var dataAad: ByteArray? =
-            null
-
-        try {
-
-            wrapAad =
-                buildWrapAad(
-                    vaultId = vaultId,
-                    salt = salt,
-                    memoryKiB = ARGON_MEMORY_KIB,
-                    iterations = ARGON_ITERATIONS,
-                    parallelism = ARGON_PARALLELISM
-                )
-
-            wrappedDek =
-                encryptGcm(
-                    key = kek,
-                    nonce = wrapNonce,
-                    plaintext = dek,
-                    aad = wrapAad
-                )
-
-            dataAad =
-                buildVaultAad(
-                    vaultId
-                )
-
-            encryptedVault =
-                encryptGcm(
-                    key = dek,
-                    nonce = dataNonce,
-                    plaintext = emptyVaultPlaintext,
-                    aad = dataAad
-                )
-
-            val envelope =
-                createEnvelope(
-                    vaultId = vaultId,
-                    salt = salt,
-                    memoryKiB = ARGON_MEMORY_KIB,
-                    iterations = ARGON_ITERATIONS,
-                    parallelism = ARGON_PARALLELISM,
-                    wrapNonce = wrapNonce,
-                    wrappedDek = wrappedDek,
-                    vaultNonce = dataNonce,
-                    vaultCiphertext = encryptedVault
-                )
+            val envelope = createEnvelope(
+                vaultId = vaultId,
+                salt = salt,
+                memoryKiB = ARGON_MEMORY_KIB,
+                iterations = ARGON_ITERATIONS,
+                parallelism = ARGON_PARALLELISM,
+                wrapNonce = wrapNonce,
+                wrappedDek = wrappedDek,
+                vaultNonce = dataNonce,
+                vaultCiphertext = encryptedVault
+            )
 
             writeWithRollback(
                 context = context,
@@ -302,467 +128,251 @@ object VaultManager {
             )
 
         } finally {
-
             emptyVaultPlaintext.fill(0)
-
             vaultId.fill(0)
             salt.fill(0)
-
             dek.fill(0)
             kek.fill(0)
-
             wrapNonce.fill(0)
             dataNonce.fill(0)
-
             wrappedDek?.fill(0)
             encryptedVault?.fill(0)
-
             wrapAad?.fill(0)
             dataAad?.fill(0)
         }
     }
 
-    // =============================================================
-    // LOAD WITH PASSWORD
-    // =============================================================
-
-    /**
-     * Opens a vault using the master password.
-     */
     fun loadVault(
         context: Context,
         uri: Uri,
-        password: String
+        password: String,
+        recoveryKey: ByteArray
     ): JSONArray? {
-
-        var parsed: ParsedEnvelope? =
-            null
-
-        var kek: ByteArray? =
-            null
-
-        var dek: ByteArray? =
-            null
-
-        var wrapAad: ByteArray? =
-            null
-
-        var plaintext: ByteArray? =
-            null
-
-        var dataAad: ByteArray? =
-            null
+        if (recoveryKey.size != RECOVERY_KEY_BYTES) return null
+        var parsed: ParsedEnvelope? = null
+        var kek: ByteArray? = null
+        var dek: ByteArray? = null
+        var wrapAad: ByteArray? = null
+        var plaintext: ByteArray? = null
+        var dataAad: ByteArray? = null
 
         return try {
-
-            parsed =
-                readAndParseEnvelope(
-                    context,
-                    uri
-                )
-                    ?: return null
-
-            kek =
-                deriveKek(
-                    password = password,
-                    salt = parsed.kdf.salt,
-                    memoryKiB = parsed.kdf.memoryKiB,
-                    iterations = parsed.kdf.iterations,
-                    parallelism = parsed.kdf.parallelism
-                )
-
-            wrapAad =
-                buildWrapAad(
-                    vaultId = parsed.vaultId,
-                    salt = parsed.kdf.salt,
-                    memoryKiB = parsed.kdf.memoryKiB,
-                    iterations = parsed.kdf.iterations,
-                    parallelism = parsed.kdf.parallelism
-                )
-
-            dek =
-                decryptGcm(
-                    key = kek,
-                    nonce = parsed.wrappedDek.nonce,
-                    ciphertext = parsed.wrappedDek.ciphertext,
-                    aad = wrapAad
-                )
-
-            if (
-                dek.size != KEY_BYTES
-            ) {
-
-                return null
-            }
-
-            dataAad =
-                buildVaultAad(
-                    parsed.vaultId
-                )
-
-            plaintext =
-                decryptGcm(
-                    key = dek,
-                    nonce = parsed.vaultData.nonce,
-                    ciphertext = parsed.vaultData.ciphertext,
-                    aad = dataAad
-                )
-
-            val json =
-                String(
-                    plaintext,
-                    StandardCharsets.UTF_8
-                )
-
-            JSONArray(
-                json
+            parsed = readAndParseEnvelope(context, uri) ?: return null
+            kek = deriveKek(
+                password = password,
+                recoveryKey = recoveryKey,
+                vaultId = parsed.vaultId,
+                salt = parsed.kdf.salt,
+                memoryKiB = parsed.kdf.memoryKiB,
+                iterations = parsed.kdf.iterations,
+                parallelism = parsed.kdf.parallelism
             )
+
+            wrapAad = buildWrapAad(
+                vaultId = parsed.vaultId,
+                salt = parsed.kdf.salt,
+                memoryKiB = parsed.kdf.memoryKiB,
+                iterations = parsed.kdf.iterations,
+                parallelism = parsed.kdf.parallelism
+            )
+
+            dek = decryptGcm(
+                key = kek,
+                nonce = parsed.wrappedDek.nonce,
+                ciphertext = parsed.wrappedDek.ciphertext,
+                aad = wrapAad
+            )
+
+            if (dek.size != KEY_BYTES) return null
+            dataAad = buildVaultAad(parsed.vaultId)
+            plaintext = decryptGcm(
+                key = dek,
+                nonce = parsed.vaultData.nonce,
+                ciphertext = parsed.vaultData.ciphertext,
+                aad = dataAad
+            )
+
+            JSONArray(String(plaintext, StandardCharsets.UTF_8))
 
         } catch (e: Exception) {
-
-            Log.w(
-                TAG,
-                "Vault authentication/decryption failed"
-            )
-
+            Log.w(TAG, "Vault authentication/decryption failed")
             null
 
         } finally {
-
             kek?.fill(0)
             dek?.fill(0)
-
             wrapAad?.fill(0)
             dataAad?.fill(0)
-
             plaintext?.fill(0)
-
             parsed?.wipe()
         }
     }
 
-    // =============================================================
-    // GET DEK FROM PASSWORD
-    // =============================================================
-
-    /**
-     * Returns the random vault DEK after successfully verifying
-     * the master password and the vault.
-     *
-     * Despite the historical method name, this no longer returns
-     * the password-derived key.
-     *
-     * It now returns the random 256-bit Vault DEK.
-     */
     fun deriveVaultKey(
         context: Context,
         uri: Uri,
-        password: String
+        password: String,
+        recoveryKey: ByteArray
     ): ByteArray? {
-
-        var parsed: ParsedEnvelope? =
-            null
-
-        var kek: ByteArray? =
-            null
-
-        var dek: ByteArray? =
-            null
-
-        var wrapAad: ByteArray? =
-            null
-
-        var dataAad: ByteArray? =
-            null
-
-        var plaintext: ByteArray? =
-            null
+        if (recoveryKey.size != RECOVERY_KEY_BYTES) return null
+        var parsed: ParsedEnvelope? = null
+        var kek: ByteArray? = null
+        var dek: ByteArray? = null
+        var wrapAad: ByteArray? = null
+        var dataAad: ByteArray? = null
+        var plaintext: ByteArray? = null
 
         try {
+            parsed = readAndParseEnvelope(context, uri) ?: return null
+            kek = deriveKek(
+                password = password,
+                recoveryKey = recoveryKey,
+                vaultId = parsed.vaultId,
+                salt = parsed.kdf.salt,
+                memoryKiB = parsed.kdf.memoryKiB,
+                iterations = parsed.kdf.iterations,
+                parallelism = parsed.kdf.parallelism
+            )
 
-            parsed =
-                readAndParseEnvelope(
-                    context,
-                    uri
-                )
-                    ?: return null
+            wrapAad = buildWrapAad(
+                vaultId = parsed.vaultId,
+                salt = parsed.kdf.salt,
+                memoryKiB = parsed.kdf.memoryKiB,
+                iterations = parsed.kdf.iterations,
+                parallelism = parsed.kdf.parallelism
+            )
 
-            kek =
-                deriveKek(
-                    password = password,
-                    salt = parsed.kdf.salt,
-                    memoryKiB = parsed.kdf.memoryKiB,
-                    iterations = parsed.kdf.iterations,
-                    parallelism = parsed.kdf.parallelism
-                )
+            dek = decryptGcm(
+                key = kek,
+                nonce = parsed.wrappedDek.nonce,
+                ciphertext = parsed.wrappedDek.ciphertext,
+                aad = wrapAad
+            )
 
-            wrapAad =
-                buildWrapAad(
-                    vaultId = parsed.vaultId,
-                    salt = parsed.kdf.salt,
-                    memoryKiB = parsed.kdf.memoryKiB,
-                    iterations = parsed.kdf.iterations,
-                    parallelism = parsed.kdf.parallelism
-                )
-
-            dek =
-                decryptGcm(
-                    key = kek,
-                    nonce = parsed.wrappedDek.nonce,
-                    ciphertext = parsed.wrappedDek.ciphertext,
-                    aad = wrapAad
-                )
-
-            if (
-                dek.size != KEY_BYTES
-            ) {
-
+            if (dek.size != KEY_BYTES) {
                 dek.fill(0)
-
                 return null
             }
 
-            /*
-             * Verify the DEK against the actual vault ciphertext
-             * before returning it.
-             */
-            dataAad =
-                buildVaultAad(
-                    parsed.vaultId
-                )
-
-            plaintext =
-                decryptGcm(
-                    key = dek,
-                    nonce = parsed.vaultData.nonce,
-                    ciphertext = parsed.vaultData.ciphertext,
-                    aad = dataAad
-                )
-
-            /*
-             * Ensure plaintext is actually valid vault JSON.
-             */
-            JSONArray(
-                String(
-                    plaintext,
-                    StandardCharsets.UTF_8
-                )
+            dataAad = buildVaultAad(parsed.vaultId)
+            plaintext = decryptGcm(
+                key = dek,
+                nonce = parsed.vaultData.nonce,
+                ciphertext = parsed.vaultData.ciphertext,
+                aad = dataAad
             )
 
-            /*
-             * Return a defensive copy.
-             *
-             * The local copy will be wiped below.
-             */
+            JSONArray(String(plaintext, StandardCharsets.UTF_8))
+
             return dek.copyOf()
 
         } catch (e: Exception) {
-
-            Log.w(
-                TAG,
-                "Master password verification failed"
-            )
-
+            Log.w(TAG, "Vault authentication failed")
             return null
 
         } finally {
-
             kek?.fill(0)
             dek?.fill(0)
-
             wrapAad?.fill(0)
             dataAad?.fill(0)
-
             plaintext?.fill(0)
-
             parsed?.wipe()
         }
     }
 
-    // =============================================================
-    // LOAD USING EXISTING DEK
-    // =============================================================
-
-    /**
-     * Used after the vault has already been unlocked.
-     *
-     * biometric unlock also eventually supplies this same DEK.
-     */
     fun loadVaultWithKey(
         context: Context,
         uri: Uri,
         vaultKey: ByteArray
     ): JSONArray? {
-
-        if (
-            vaultKey.size != KEY_BYTES
-        ) {
-
-            return null
-        }
-
-        var parsed: ParsedEnvelope? =
-            null
-
-        var dataAad: ByteArray? =
-            null
-
-        var plaintext: ByteArray? =
-            null
+        if (vaultKey.size != KEY_BYTES) return null
+        var parsed: ParsedEnvelope? = null
+        var dataAad: ByteArray? = null
+        var plaintext: ByteArray? = null
 
         return try {
-
-            parsed =
-                readAndParseEnvelope(
-                    context,
-                    uri
-                )
-                    ?: return null
-
-            dataAad =
-                buildVaultAad(
-                    parsed.vaultId
-                )
-
-            plaintext =
-                decryptGcm(
-                    key = vaultKey,
-                    nonce = parsed.vaultData.nonce,
-                    ciphertext = parsed.vaultData.ciphertext,
-                    aad = dataAad
-                )
-
-            JSONArray(
-                String(
-                    plaintext,
-                    StandardCharsets.UTF_8
-                )
+            parsed = readAndParseEnvelope(context, uri) ?: return null
+            dataAad = buildVaultAad(parsed.vaultId)
+            plaintext = decryptGcm(
+                key = vaultKey,
+                nonce = parsed.vaultData.nonce,
+                ciphertext = parsed.vaultData.ciphertext,
+                aad = dataAad
             )
+
+            JSONArray(String(plaintext, StandardCharsets.UTF_8))
 
         } catch (e: Exception) {
-
-            Log.w(
-                TAG,
-                "Vault DEK authentication failed"
-            )
-
+            Log.w(TAG, "Vault DEK authentication failed")
             null
 
         } finally {
-
             dataAad?.fill(0)
             plaintext?.fill(0)
-
             parsed?.wipe()
         }
     }
-
-    // =============================================================
-    // SAVE WITH PASSWORD
-    // =============================================================
 
     fun saveVault(
         context: Context,
         uri: Uri,
         entries: JSONArray,
-        password: String
+        password: String,
+        recoveryKey: ByteArray
     ) {
-
-        var parsed: ParsedEnvelope? =
-            null
-
-        var kek: ByteArray? =
-            null
-
-        var dek: ByteArray? =
-            null
-
-        var wrapAad: ByteArray? =
-            null
-
-        var verificationAad: ByteArray? =
-            null
-
-        var verificationPlaintext: ByteArray? =
-            null
+        require(recoveryKey.size == RECOVERY_KEY_BYTES) { "Invalid recovery key size" }
+        var parsed: ParsedEnvelope? = null
+        var kek: ByteArray? = null
+        var dek: ByteArray? = null
+        var wrapAad: ByteArray? = null
+        var verificationAad: ByteArray? = null
+        var verificationPlaintext: ByteArray? = null
 
         try {
+            val oldRaw = readTextLimited(context, uri)
+                ?: throw IllegalStateException("Vault file unavailable")
 
-            val oldRaw =
-                readTextLimited(
-                    context,
-                    uri
-                )
-                    ?: throw IllegalStateException(
-                        "Vault file unavailable"
-                    )
+            parsed = parseEnvelope(oldRaw)
+                ?: throw SecurityException("Invalid vault format")
 
-            parsed =
-                parseEnvelope(
-                    oldRaw
-                )
-                    ?: throw SecurityException(
-                        "Invalid vault format"
-                    )
-
-            kek =
-                deriveKek(
-                    password = password,
-                    salt = parsed.kdf.salt,
-                    memoryKiB = parsed.kdf.memoryKiB,
-                    iterations = parsed.kdf.iterations,
-                    parallelism = parsed.kdf.parallelism
-                )
-
-            wrapAad =
-                buildWrapAad(
-                    vaultId = parsed.vaultId,
-                    salt = parsed.kdf.salt,
-                    memoryKiB = parsed.kdf.memoryKiB,
-                    iterations = parsed.kdf.iterations,
-                    parallelism = parsed.kdf.parallelism
-                )
-
-            dek =
-                decryptGcm(
-                    key = kek,
-                    nonce = parsed.wrappedDek.nonce,
-                    ciphertext = parsed.wrappedDek.ciphertext,
-                    aad = wrapAad
-                )
-
-            if (
-                dek.size != KEY_BYTES
-            ) {
-
-                throw SecurityException(
-                    "Invalid DEK"
-                )
-            }
-
-            /*
-             * Verify current vault before allowing an overwrite.
-             */
-            verificationAad =
-                buildVaultAad(
-                    parsed.vaultId
-                )
-
-            verificationPlaintext =
-                decryptGcm(
-                    key = dek,
-                    nonce = parsed.vaultData.nonce,
-                    ciphertext = parsed.vaultData.ciphertext,
-                    aad = verificationAad
-                )
-
-            JSONArray(
-                String(
-                    verificationPlaintext,
-                    StandardCharsets.UTF_8
-                )
+            kek = deriveKek(
+                password = password,
+                recoveryKey = recoveryKey,
+                vaultId = parsed.vaultId,
+                salt = parsed.kdf.salt,
+                memoryKiB = parsed.kdf.memoryKiB,
+                iterations = parsed.kdf.iterations,
+                parallelism = parsed.kdf.parallelism
             )
 
+            wrapAad = buildWrapAad(
+                vaultId = parsed.vaultId,
+                salt = parsed.kdf.salt,
+                memoryKiB = parsed.kdf.memoryKiB,
+                iterations = parsed.kdf.iterations,
+                parallelism = parsed.kdf.parallelism
+            )
+
+            dek = decryptGcm(
+                key = kek,
+                nonce = parsed.wrappedDek.nonce,
+                ciphertext = parsed.wrappedDek.ciphertext,
+                aad = wrapAad
+            )
+
+            if (dek.size != KEY_BYTES) {
+                throw SecurityException("Invalid DEK")
+            }
+
+            verificationAad = buildVaultAad(parsed.vaultId)
+            verificationPlaintext = decryptGcm(
+                key = dek,
+                nonce = parsed.vaultData.nonce,
+                ciphertext = parsed.vaultData.ciphertext,
+                aad = verificationAad
+            )
+
+            JSONArray(String(verificationPlaintext, StandardCharsets.UTF_8))
             saveEnvelopeWithDek(
                 context = context,
                 uri = uri,
@@ -773,22 +383,14 @@ object VaultManager {
             )
 
         } finally {
-
             kek?.fill(0)
             dek?.fill(0)
-
             wrapAad?.fill(0)
             verificationAad?.fill(0)
-
             verificationPlaintext?.fill(0)
-
             parsed?.wipe()
         }
     }
-
-    // =============================================================
-    // SAVE WITH EXISTING DEK
-    // =============================================================
 
     fun saveVaultWithKey(
         context: Context,
@@ -796,71 +398,24 @@ object VaultManager {
         entries: JSONArray,
         vaultKey: ByteArray
     ) {
-
-        require(
-            vaultKey.size == KEY_BYTES
-        ) {
-            "Invalid vault key size"
-        }
-
-        var parsed: ParsedEnvelope? =
-            null
-
-        var verificationAad: ByteArray? =
-            null
-
-        var verificationPlaintext: ByteArray? =
-            null
-
+        require(vaultKey.size == KEY_BYTES) { "Invalid vault key size" }
+        var parsed: ParsedEnvelope? = null
+        var verificationAad: ByteArray? = null
+        var verificationPlaintext: ByteArray? = null
         try {
-
-            val oldRaw =
-                readTextLimited(
-                    context,
-                    uri
-                )
-                    ?: throw IllegalStateException(
-                        "Vault file unavailable"
-                    )
-
-            parsed =
-                parseEnvelope(
-                    oldRaw
-                )
-                    ?: throw SecurityException(
-                        "Invalid vault"
-                    )
-
-            /*
-             * CRITICAL:
-             *
-             * Never save using a DEK until we prove that DEK
-             * authenticates the existing vault.
-             *
-             * Otherwise a wrong key could permanently overwrite
-             * the vault with data the password-wrapped DEK
-             * could never decrypt.
-             */
-            verificationAad =
-                buildVaultAad(
-                    parsed.vaultId
-                )
-
-            verificationPlaintext =
-                decryptGcm(
-                    key = vaultKey,
-                    nonce = parsed.vaultData.nonce,
-                    ciphertext = parsed.vaultData.ciphertext,
-                    aad = verificationAad
-                )
-
-            JSONArray(
-                String(
-                    verificationPlaintext,
-                    StandardCharsets.UTF_8
-                )
+            val oldRaw = readTextLimited(context, uri)
+                ?: throw IllegalStateException("Vault file unavailable")
+            parsed = parseEnvelope(oldRaw)
+                ?: throw SecurityException("Invalid vault")
+            verificationAad = buildVaultAad(parsed.vaultId)
+            verificationPlaintext = decryptGcm(
+                key = vaultKey,
+                nonce = parsed.vaultData.nonce,
+                ciphertext = parsed.vaultData.ciphertext,
+                aad = verificationAad
             )
 
+            JSONArray(String(verificationPlaintext, StandardCharsets.UTF_8))
             saveEnvelopeWithDek(
                 context = context,
                 uri = uri,
@@ -871,17 +426,11 @@ object VaultManager {
             )
 
         } finally {
-
             verificationAad?.fill(0)
             verificationPlaintext?.fill(0)
-
             parsed?.wipe()
         }
     }
-
-    // =============================================================
-    // SAVE INTERNAL
-    // =============================================================
 
     private fun saveEnvelopeWithDek(
         context: Context,
@@ -891,67 +440,34 @@ object VaultManager {
         entries: JSONArray,
         dek: ByteArray
     ) {
-
-        val plaintext =
-            entries
-                .toString()
-                .toByteArray(
-                    StandardCharsets.UTF_8
-                )
-
-        val nonce =
-            randomBytes(
-                GCM_NONCE_BYTES
+        val plaintext = entries.toString().toByteArray(StandardCharsets.UTF_8)
+        val nonce = randomBytes(GCM_NONCE_BYTES)
+        var aad: ByteArray? = null
+        var ciphertext: ByteArray? = null
+        try {
+            aad = buildVaultAad(parsed.vaultId)
+            ciphertext = encryptGcm(
+                key = dek,
+                nonce = nonce,
+                plaintext = plaintext,
+                aad = aad
             )
 
-        var aad: ByteArray? =
-            null
-
-        var ciphertext: ByteArray? =
-            null
-
-        try {
-
-            aad =
-                buildVaultAad(
-                    parsed.vaultId
-                )
-
-            ciphertext =
-                encryptGcm(
-                    key = dek,
-                    nonce = nonce,
-                    plaintext = plaintext,
-                    aad = aad
-                )
-
-            if (
-                ciphertext.size >
-                MAX_VAULT_CIPHERTEXT_BYTES
-            ) {
-
-                throw IllegalStateException(
-                    "Vault exceeds maximum size"
-                )
+            if (ciphertext.size > MAX_VAULT_CIPHERTEXT_BYTES) {
+                throw IllegalStateException("Vault exceeds maximum size")
             }
 
-            /*
-             * Password-wrapped DEK stays unchanged.
-             *
-             * Only the vault data gets a new nonce and ciphertext.
-             */
-            val envelope =
-                createEnvelope(
-                    vaultId = parsed.vaultId,
-                    salt = parsed.kdf.salt,
-                    memoryKiB = parsed.kdf.memoryKiB,
-                    iterations = parsed.kdf.iterations,
-                    parallelism = parsed.kdf.parallelism,
-                    wrapNonce = parsed.wrappedDek.nonce,
-                    wrappedDek = parsed.wrappedDek.ciphertext,
-                    vaultNonce = nonce,
-                    vaultCiphertext = ciphertext
-                )
+            val envelope = createEnvelope(
+                vaultId = parsed.vaultId,
+                salt = parsed.kdf.salt,
+                memoryKiB = parsed.kdf.memoryKiB,
+                iterations = parsed.kdf.iterations,
+                parallelism = parsed.kdf.parallelism,
+                wrapNonce = parsed.wrappedDek.nonce,
+                wrappedDek = parsed.wrappedDek.ciphertext,
+                vaultNonce = nonce,
+                vaultCiphertext = ciphertext
+            )
 
             writeWithRollback(
                 context = context,
@@ -961,29 +477,35 @@ object VaultManager {
             )
 
         } finally {
-
             plaintext.fill(0)
             nonce.fill(0)
-
             aad?.fill(0)
             ciphertext?.fill(0)
         }
     }
 
-    // =============================================================
-    // INTEGRITY
-    // =============================================================
+    fun getVaultId(context: Context, uri: Uri): ByteArray? {
+        var parsed: ParsedEnvelope? = null
+        return try {
+            parsed = readAndParseEnvelope(context, uri) ?: return null
+            parsed.vaultId.copyOf()
+
+        } finally {
+            parsed?.wipe()
+        }
+    }
 
     fun verifyIntegrity(
         context: Context,
         uri: Uri,
-        password: String
+        password: String,
+        recoveryKey: ByteArray
     ): Boolean {
-
         return loadVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         ) != null
     }
 
@@ -992,18 +514,8 @@ object VaultManager {
         uri: Uri,
         vaultKey: ByteArray
     ): Boolean {
-
-        return loadVaultWithKey(
-            context,
-            uri,
-            vaultKey
-        ) != null
+        return loadVaultWithKey(context, uri, vaultKey) != null
     }
-
-    // =============================================================
-    // CREATE JSON ENVELOPE
-    // =============================================================
-
     private fun createEnvelope(
         vaultId: ByteArray,
         salt: ByteArray,
@@ -1015,210 +527,72 @@ object VaultManager {
         vaultNonce: ByteArray,
         vaultCiphertext: ByteArray
     ): JSONObject {
-
         return JSONObject().apply {
-
-            put(
-                "format",
-                FORMAT_NAME
-            )
-
-            put(
-                "version",
-                FORMAT_VERSION
-            )
-
-            put(
-                "vaultId",
-                b64(
-                    vaultId
-                )
-            )
-
+            put("format", FORMAT_NAME)
+            put("version", FORMAT_VERSION)
+            put("vaultId", b64(vaultId))
             put(
                 "kdf",
                 JSONObject().apply {
-
-                    put(
-                        "name",
-                        KDF_NAME
-                    )
-
-                    put(
-                        "memoryKiB",
-                        memoryKiB
-                    )
-
-                    put(
-                        "iterations",
-                        iterations
-                    )
-
-                    put(
-                        "parallelism",
-                        parallelism
-                    )
-
-                    put(
-                        "salt",
-                        b64(
-                            salt
-                        )
-                    )
+                    put("name", KDF_NAME)
+                    put("combiner", KDF_COMBINER_NAME)
+                    put("info", KDF_INFO)
+                    put("memoryKiB", memoryKiB)
+                    put("iterations", iterations)
+                    put("parallelism", parallelism)
+                    put("salt", b64(salt))
                 }
             )
-
             put(
                 "wrappedDek",
                 JSONObject().apply {
-
-                    put(
-                        "cipher",
-                        CIPHER_NAME
-                    )
-
-                    put(
-                        "nonce",
-                        b64(
-                            wrapNonce
-                        )
-                    )
-
-                    put(
-                        "ciphertext",
-                        b64(
-                            wrappedDek
-                        )
-                    )
+                    put("cipher", CIPHER_NAME)
+                    put("nonce", b64(wrapNonce))
+                    put("ciphertext", b64(wrappedDek))
                 }
             )
-
             put(
                 "vault",
                 JSONObject().apply {
-
-                    put(
-                        "cipher",
-                        CIPHER_NAME
-                    )
-
-                    put(
-                        "nonce",
-                        b64(
-                            vaultNonce
-                        )
-                    )
-
-                    put(
-                        "ciphertext",
-                        b64(
-                            vaultCiphertext
-                        )
-                    )
+                    put("cipher", CIPHER_NAME)
+                    put("nonce", b64(vaultNonce))
+                    put("ciphertext", b64(vaultCiphertext))
                 }
             )
         }
     }
 
-    // =============================================================
-    // PARSE
-    // =============================================================
-
-    private fun readAndParseEnvelope(
-        context: Context,
-        uri: Uri
-    ): ParsedEnvelope? {
-
-        val raw =
-            readTextLimited(
-                context,
-                uri
-            )
-                ?: return null
-
-        return parseEnvelope(
-            raw
-        )
+    private fun readAndParseEnvelope(context: Context, uri: Uri): ParsedEnvelope? {
+        val raw = readTextLimited(context, uri) ?: return null
+        return parseEnvelope(raw)
     }
 
-    /**
-     * Strict parser.
-     *
-     * A malicious vault file is treated as attacker-controlled input.
-     */
-    private fun parseEnvelope(
-        raw: String
-    ): ParsedEnvelope? {
-
-        if (
-            raw.isBlank() ||
-            raw.length > MAX_ENVELOPE_CHARS
-        ) {
-
-            return null
-        }
-
+    private fun parseEnvelope(raw: String): ParsedEnvelope? {
+        if (raw.isBlank() || raw.length > MAX_ENVELOPE_CHARS) return null
         return try {
-
-            val root =
-                JSONObject(
-                    raw
-                )
-
+            val root = JSONObject(raw)
             if (
                 !hasExactKeys(
                     root,
-                    setOf(
-                        "format",
-                        "version",
-                        "vaultId",
-                        "kdf",
-                        "wrappedDek",
-                        "vault"
-                    )
+                    setOf("format", "version", "vaultId", "kdf", "wrappedDek", "vault")
                 )
-            ) {
+            ) return null
 
-                return null
-            }
+            if (root.getString("format") != FORMAT_NAME) return null
+            if (root.getInt("version") != FORMAT_VERSION) return null
+            val vaultId = decodeB64Exact(
+                root.getString("vaultId"),
+                VAULT_ID_BYTES
+            ) ?: return null
 
-            if (
-                root.getString(
-                    "format"
-                ) != FORMAT_NAME
-            ) {
-
-                return null
-            }
-
-            if (
-                root.getInt(
-                    "version"
-                ) != FORMAT_VERSION
-            ) {
-
-                return null
-            }
-
-            val vaultId =
-                decodeB64Exact(
-                    root.getString(
-                        "vaultId"
-                    ),
-                    VAULT_ID_BYTES
-                )
-                    ?: return null
-
-            val kdfJson =
-                root.getJSONObject(
-                    "kdf"
-                )
-
+            val kdfJson = root.getJSONObject("kdf")
             if (
                 !hasExactKeys(
                     kdfJson,
                     setOf(
                         "name",
+                        "combiner",
+                        "info",
                         "memoryKiB",
                         "iterations",
                         "parallelism",
@@ -1226,269 +600,160 @@ object VaultManager {
                     )
                 )
             ) {
-
                 vaultId.fill(0)
-
                 return null
             }
 
-            if (
-                kdfJson.getString(
-                    "name"
-                ) != KDF_NAME
-            ) {
-
+            if (kdfJson.getString("name") != KDF_NAME) {
                 vaultId.fill(0)
-
                 return null
             }
 
-            val memoryKiB =
-                kdfJson.getInt(
-                    "memoryKiB"
-                )
-
-            val iterations =
-                kdfJson.getInt(
-                    "iterations"
-                )
-
-            val parallelism =
-                kdfJson.getInt(
-                    "parallelism"
-                )
-
-            if (
-                memoryKiB !in
-                MIN_ARGON_MEMORY_KIB..
-                MAX_ARGON_MEMORY_KIB
-            ) {
-
+            if (kdfJson.getString("combiner") != KDF_COMBINER_NAME) {
                 vaultId.fill(0)
-
                 return null
             }
 
-            if (
-                iterations !in
-                MIN_ARGON_ITERATIONS..
-                MAX_ARGON_ITERATIONS
-            ) {
-
+            if (kdfJson.getString("info") != KDF_INFO) {
                 vaultId.fill(0)
-
                 return null
             }
 
-            if (
-                parallelism !in
-                MIN_ARGON_PARALLELISM..
-                MAX_ARGON_PARALLELISM
-            ) {
-
+            val memoryKiB = kdfJson.getInt("memoryKiB")
+            val iterations = kdfJson.getInt("iterations")
+            val parallelism = kdfJson.getInt("parallelism")
+            if (memoryKiB !in MIN_ARGON_MEMORY_KIB..MAX_ARGON_MEMORY_KIB) {
                 vaultId.fill(0)
-
                 return null
             }
 
-            val salt =
-                decodeB64Exact(
-                    kdfJson.getString(
-                        "salt"
-                    ),
-                    SALT_BYTES
-                )
-                    ?: run {
+            if (iterations !in MIN_ARGON_ITERATIONS..MAX_ARGON_ITERATIONS) {
+                vaultId.fill(0)
+                return null
+            }
 
-                        vaultId.fill(0)
+            if (parallelism !in MIN_ARGON_PARALLELISM..MAX_ARGON_PARALLELISM) {
+                vaultId.fill(0)
+                return null
+            }
 
-                        return null
-                    }
+            val salt = decodeB64Exact(
+                kdfJson.getString("salt"),
+                SALT_BYTES
+            ) ?: run {
+                vaultId.fill(0)
+                return null
+            }
 
-            val wrappedJson =
-                root.getJSONObject(
-                    "wrappedDek"
-                )
-
+            val wrappedJson = root.getJSONObject("wrappedDek")
             if (
                 !hasExactKeys(
                     wrappedJson,
-                    setOf(
-                        "cipher",
-                        "nonce",
-                        "ciphertext"
-                    )
+                    setOf("cipher", "nonce", "ciphertext")
                 )
             ) {
-
                 vaultId.fill(0)
                 salt.fill(0)
-
                 return null
             }
 
-            if (
-                wrappedJson.getString(
-                    "cipher"
-                ) != CIPHER_NAME
-            ) {
-
+            if (wrappedJson.getString("cipher") != CIPHER_NAME) {
                 vaultId.fill(0)
                 salt.fill(0)
-
                 return null
             }
 
-            val wrapNonce =
-                decodeB64Exact(
-                    wrappedJson.getString(
-                        "nonce"
-                    ),
-                    GCM_NONCE_BYTES
-                )
-                    ?: run {
+            val wrapNonce = decodeB64Exact(
+                wrappedJson.getString("nonce"),
+                GCM_NONCE_BYTES
+            ) ?: run {
+                vaultId.fill(0)
+                salt.fill(0)
+                return null
+            }
 
-                        vaultId.fill(0)
-                        salt.fill(0)
+            val wrappedDek = decodeB64Exact(
+                wrappedJson.getString("ciphertext"),
+                WRAPPED_DEK_BYTES
+            ) ?: run {
+                vaultId.fill(0)
+                salt.fill(0)
+                wrapNonce.fill(0)
+                return null
+            }
 
-                        return null
-                    }
-
-            val wrappedDek =
-                decodeB64Exact(
-                    wrappedJson.getString(
-                        "ciphertext"
-                    ),
-                    WRAPPED_DEK_BYTES
-                )
-                    ?: run {
-
-                        vaultId.fill(0)
-                        salt.fill(0)
-                        wrapNonce.fill(0)
-
-                        return null
-                    }
-
-            val vaultJson =
-                root.getJSONObject(
-                    "vault"
-                )
-
+            val vaultJson = root.getJSONObject("vault")
             if (
                 !hasExactKeys(
                     vaultJson,
-                    setOf(
-                        "cipher",
-                        "nonce",
-                        "ciphertext"
-                    )
+                    setOf("cipher", "nonce", "ciphertext")
                 )
             ) {
-
                 vaultId.fill(0)
                 salt.fill(0)
                 wrapNonce.fill(0)
                 wrappedDek.fill(0)
-
                 return null
             }
 
-            if (
-                vaultJson.getString(
-                    "cipher"
-                ) != CIPHER_NAME
-            ) {
-
+            if (vaultJson.getString("cipher") != CIPHER_NAME) {
                 vaultId.fill(0)
                 salt.fill(0)
                 wrapNonce.fill(0)
                 wrappedDek.fill(0)
-
                 return null
             }
 
-            val vaultNonce =
-                decodeB64Exact(
-                    vaultJson.getString(
-                        "nonce"
-                    ),
-                    GCM_NONCE_BYTES
-                )
-                    ?: run {
+            val vaultNonce = decodeB64Exact(
+                vaultJson.getString("nonce"),
+                GCM_NONCE_BYTES
+            ) ?: run {
+                vaultId.fill(0)
+                salt.fill(0)
+                wrapNonce.fill(0)
+                wrappedDek.fill(0)
+                return null
+            }
 
-                        vaultId.fill(0)
-                        salt.fill(0)
-                        wrapNonce.fill(0)
-                        wrappedDek.fill(0)
-
-                        return null
-                    }
-
-            val vaultCiphertextB64 =
-                vaultJson.getString(
-                    "ciphertext"
-                )
-
-            /*
-             * Reject obviously huge Base64 before decoding it.
-             */
+            val vaultCiphertextB64 = vaultJson.getString("ciphertext")
             if (
                 vaultCiphertextB64.length >
-                (
-                        MAX_VAULT_CIPHERTEXT_BYTES *
-                                4 / 3
-                        ) + 16
+                (MAX_VAULT_CIPHERTEXT_BYTES * 4 / 3) + 16
             ) {
-
                 vaultId.fill(0)
                 salt.fill(0)
-
                 wrapNonce.fill(0)
                 wrappedDek.fill(0)
                 vaultNonce.fill(0)
-
                 return null
             }
 
-            val vaultCiphertext =
-                b64d(
-                    vaultCiphertextB64
-                )
-
+            val vaultCiphertext = b64d(vaultCiphertextB64)
             if (
                 vaultCiphertext.size < 16 ||
-                vaultCiphertext.size >
-                MAX_VAULT_CIPHERTEXT_BYTES
+                vaultCiphertext.size > MAX_VAULT_CIPHERTEXT_BYTES
             ) {
-
                 vaultId.fill(0)
                 salt.fill(0)
-
                 wrapNonce.fill(0)
                 wrappedDek.fill(0)
-
                 vaultNonce.fill(0)
                 vaultCiphertext.fill(0)
-
                 return null
             }
 
             ParsedEnvelope(
                 vaultId = vaultId,
-
                 kdf = ParsedKdf(
                     memoryKiB = memoryKiB,
                     iterations = iterations,
                     parallelism = parallelism,
                     salt = salt
                 ),
-
                 wrappedDek = ParsedCipherBlob(
                     nonce = wrapNonce,
                     ciphertext = wrappedDek
                 ),
-
                 vaultData = ParsedCipherBlob(
                     nonce = vaultNonce,
                     ciphertext = vaultCiphertext
@@ -1496,25 +761,11 @@ object VaultManager {
             )
 
         } catch (e: Exception) {
-
-            Log.w(
-                TAG,
-                "Invalid Athena vault envelope"
-            )
-
+            Log.w(TAG, "Invalid Athena v4 vault envelope")
             null
         }
     }
 
-    // =============================================================
-    // AAD
-    // =============================================================
-
-    /**
-     * Authenticated metadata used while wrapping the DEK.
-     *
-     * Binary encoding avoids relying on JSONObject key order.
-     */
     private fun buildWrapAad(
         vaultId: ByteArray,
         salt: ByteArray,
@@ -1522,175 +773,98 @@ object VaultManager {
         iterations: Int,
         parallelism: Int
     ): ByteArray {
+        val output = ByteArrayOutputStream()
 
-        val output =
-            ByteArrayOutputStream()
-
-        DataOutputStream(
-            output
-        ).use { data ->
-
-            data.writeUTF(
-                FORMAT_NAME
-            )
-
-            data.writeInt(
-                FORMAT_VERSION
-            )
-
-            data.writeUTF(
-                KDF_NAME
-            )
-
-            data.writeUTF(
-                CIPHER_NAME
-            )
-
-            data.writeInt(
-                memoryKiB
-            )
-
-            data.writeInt(
-                iterations
-            )
-
-            data.writeInt(
-                parallelism
-            )
-
-            data.writeInt(
-                vaultId.size
-            )
-
-            data.write(
-                vaultId
-            )
-
-            data.writeInt(
-                salt.size
-            )
-
-            data.write(
-                salt
-            )
+        DataOutputStream(output).use { data ->
+            data.writeUTF(FORMAT_NAME)
+            data.writeInt(FORMAT_VERSION)
+            data.writeUTF(KDF_NAME)
+            data.writeUTF(KDF_COMBINER_NAME)
+            data.writeUTF(KDF_INFO)
+            data.writeUTF(CIPHER_NAME)
+            data.writeInt(memoryKiB)
+            data.writeInt(iterations)
+            data.writeInt(parallelism)
+            data.writeInt(vaultId.size)
+            data.write(vaultId)
+            data.writeInt(salt.size)
+            data.write(salt)
         }
 
         return output.toByteArray()
     }
 
-    /**
-     * Metadata authenticated with the encrypted vault contents.
-     *
-     * This intentionally does not contain password-specific
-     * wrapping data, allowing the master password to be changed
-     * later without re-encrypting all vault contents.
-     */
-    private fun buildVaultAad(
-        vaultId: ByteArray
-    ): ByteArray {
+    private fun buildVaultAad(vaultId: ByteArray): ByteArray {
+        val output = ByteArrayOutputStream()
 
-        val output =
-            ByteArrayOutputStream()
-
-        DataOutputStream(
-            output
-        ).use { data ->
-
-            data.writeUTF(
-                FORMAT_NAME
-            )
-
-            data.writeInt(
-                FORMAT_VERSION
-            )
-
-            data.writeUTF(
-                CIPHER_NAME
-            )
-
-            data.writeInt(
-                vaultId.size
-            )
-
-            data.write(
-                vaultId
-            )
+        DataOutputStream(output).use { data ->
+            data.writeUTF(FORMAT_NAME)
+            data.writeInt(FORMAT_VERSION)
+            data.writeUTF(CIPHER_NAME)
+            data.writeInt(vaultId.size)
+            data.write(vaultId)
         }
 
         return output.toByteArray()
     }
-
-    // =============================================================
-    // ARGON2ID
-    // =============================================================
-
     private fun deriveKek(
+        password: String,
+        recoveryKey: ByteArray,
+        vaultId: ByteArray,
+        salt: ByteArray,
+        memoryKiB: Int,
+        iterations: Int,
+        parallelism: Int
+    ): ByteArray {
+        require(recoveryKey.size == RECOVERY_KEY_BYTES)
+        require(vaultId.size == VAULT_ID_BYTES)
+
+        var passwordKey: ByteArray? = null
+        return try {
+            passwordKey = derivePasswordKey(
+                password = password,
+                salt = salt,
+                memoryKiB = memoryKiB,
+                iterations = iterations,
+                parallelism = parallelism
+            )
+
+            deriveCombinedKek(
+                passwordKey = passwordKey,
+                recoveryKey = recoveryKey,
+                vaultId = vaultId
+            )
+
+        } finally {
+            passwordKey?.fill(0)
+        }
+    }
+
+    private fun derivePasswordKey(
         password: String,
         salt: ByteArray,
         memoryKiB: Int,
         iterations: Int,
         parallelism: Int
     ): ByteArray {
+        require(salt.size == SALT_BYTES)
+        require(memoryKiB in MIN_ARGON_MEMORY_KIB..MAX_ARGON_MEMORY_KIB)
+        require(iterations in MIN_ARGON_ITERATIONS..MAX_ARGON_ITERATIONS)
+        require(parallelism in MIN_ARGON_PARALLELISM..MAX_ARGON_PARALLELISM)
 
-        require(
-            salt.size == SALT_BYTES
-        )
-
-        require(
-            memoryKiB in
-                    MIN_ARGON_MEMORY_KIB..
-                    MAX_ARGON_MEMORY_KIB
-        )
-
-        require(
-            iterations in
-                    MIN_ARGON_ITERATIONS..
-                    MAX_ARGON_ITERATIONS
-        )
-
-        require(
-            parallelism in
-                    MIN_ARGON_PARALLELISM..
-                    MAX_ARGON_PARALLELISM
-        )
-
-        val passwordBytes =
-            password.toByteArray(
-                StandardCharsets.UTF_8
-            )
-
+        val passwordBytes = password.toByteArray(StandardCharsets.UTF_8)
         try {
+            val parameters = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
+                .withSalt(salt)
+                .withMemoryAsKB(memoryKiB)
+                .withIterations(iterations)
+                .withParallelism(parallelism)
+                .build()
 
-            val parameters =
-                Argon2Parameters
-                    .Builder(
-                        Argon2Parameters.ARGON2_id
-                    )
-                    .withSalt(
-                        salt
-                    )
-                    .withMemoryAsKB(
-                        memoryKiB
-                    )
-                    .withIterations(
-                        iterations
-                    )
-                    .withParallelism(
-                        parallelism
-                    )
-                    .build()
+            val generator = Argon2BytesGenerator()
+            generator.init(parameters)
 
-            val generator =
-                Argon2BytesGenerator()
-
-            generator.init(
-                parameters
-            )
-
-            val output =
-                ByteArray(
-                    KEY_BYTES
-                )
+            val output = ByteArray(KEY_BYTES)
 
             generator.generateBytes(
                 passwordBytes,
@@ -1702,14 +876,58 @@ object VaultManager {
             return output
 
         } finally {
-
             passwordBytes.fill(0)
         }
     }
 
-    // =============================================================
-    // AES-256-GCM
-    // =============================================================
+    private fun deriveCombinedKek(
+        passwordKey: ByteArray,
+        recoveryKey: ByteArray,
+        vaultId: ByteArray
+    ): ByteArray {
+        require(passwordKey.size == KEY_BYTES)
+        require(recoveryKey.size == RECOVERY_KEY_BYTES)
+        require(vaultId.size == VAULT_ID_BYTES)
+
+        var prk: ByteArray? = null
+        var expanded: ByteArray? = null
+        val info = KDF_INFO.toByteArray(StandardCharsets.UTF_8)
+        try {
+            val extractMac = Mac.getInstance(HMAC_NAME)
+
+            extractMac.init(
+                SecretKeySpec(
+                    vaultId,
+                    HMAC_NAME
+                )
+            )
+
+            extractMac.update(passwordKey)
+            extractMac.update(recoveryKey)
+
+            prk = extractMac.doFinal()
+
+            val expandMac = Mac.getInstance(HMAC_NAME)
+            expandMac.init(
+                SecretKeySpec(
+                    prk,
+                    HMAC_NAME
+                )
+            )
+
+            expandMac.update(info)
+            expandMac.update(1.toByte())
+
+            expanded = expandMac.doFinal()
+
+            return expanded.copyOf(KEY_BYTES)
+
+        } finally {
+            prk?.fill(0)
+            expanded?.fill(0)
+            info.fill(0)
+        }
+    }
 
     private fun encryptGcm(
         key: ByteArray,
@@ -1717,39 +935,19 @@ object VaultManager {
         plaintext: ByteArray,
         aad: ByteArray
     ): ByteArray {
-
-        require(
-            key.size == KEY_BYTES
-        )
-
-        require(
-            nonce.size == GCM_NONCE_BYTES
-        )
-
-        val cipher =
-            Cipher.getInstance(
-                "AES/GCM/NoPadding"
-            )
+        require(key.size == KEY_BYTES)
+        require(nonce.size == GCM_NONCE_BYTES)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
 
         cipher.init(
             Cipher.ENCRYPT_MODE,
-            SecretKeySpec(
-                key,
-                "AES"
-            ),
-            GCMParameterSpec(
-                GCM_TAG_BITS,
-                nonce
-            )
+            SecretKeySpec(key, "AES"),
+            GCMParameterSpec(GCM_TAG_BITS, nonce)
         )
 
-        cipher.updateAAD(
-            aad
-        )
+        cipher.updateAAD(aad)
 
-        return cipher.doFinal(
-            plaintext
-        )
+        return cipher.doFinal(plaintext)
     }
 
     private fun decryptGcm(
@@ -1758,112 +956,36 @@ object VaultManager {
         ciphertext: ByteArray,
         aad: ByteArray
     ): ByteArray {
-
-        require(
-            key.size == KEY_BYTES
-        )
-
-        require(
-            nonce.size == GCM_NONCE_BYTES
-        )
-
-        val cipher =
-            Cipher.getInstance(
-                "AES/GCM/NoPadding"
-            )
-
+        require(key.size == KEY_BYTES)
+        require(nonce.size == GCM_NONCE_BYTES)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(
             Cipher.DECRYPT_MODE,
-            SecretKeySpec(
-                key,
-                "AES"
-            ),
-            GCMParameterSpec(
-                GCM_TAG_BITS,
-                nonce
-            )
+            SecretKeySpec(key, "AES"),
+            GCMParameterSpec(GCM_TAG_BITS, nonce)
         )
 
-        cipher.updateAAD(
-            aad
-        )
+        cipher.updateAAD(aad)
 
-        return cipher.doFinal(
-            ciphertext
-        )
+        return cipher.doFinal(ciphertext)
     }
 
-    // =============================================================
-    // FILE IO
-    // =============================================================
-
-    /**
-     * Reads with an explicit size limit.
-     */
-    private fun readTextLimited(
-        context: Context,
-        uri: Uri
-    ): String? {
-
+    private fun readTextLimited(context: Context, uri: Uri): String? {
         return try {
-
-            val input =
-                context
-                    .contentResolver
-                    .openInputStream(
-                        uri
-                    )
-                    ?: return null
-
+            val input = context.contentResolver.openInputStream(uri) ?: return null
             input.use { stream ->
-
-                InputStreamReader(
-                    stream,
-                    Charsets.UTF_8
-                ).use { reader ->
-
-                    val builder =
-                        StringBuilder()
-
-                    val buffer =
-                        CharArray(
-                            8192
-                        )
-
-                    var total =
-                        0
-
+                InputStreamReader(stream, Charsets.UTF_8).use { reader ->
+                    val builder = StringBuilder()
+                    val buffer = CharArray(8192)
+                    var total = 0
                     while (true) {
-
-                        val read =
-                            reader.read(
-                                buffer
-                            )
-
-                        if (
-                            read < 0
-                        ) {
-                            break
+                        val read = reader.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > MAX_ENVELOPE_CHARS) {
+                            throw IllegalStateException("Vault file exceeds maximum size")
                         }
-
-                        total +=
-                            read
-
-                        if (
-                            total >
-                            MAX_ENVELOPE_CHARS
-                        ) {
-
-                            throw IllegalStateException(
-                                "Vault file exceeds maximum size"
-                            )
-                        }
-
-                        builder.append(
-                            buffer,
-                            0,
-                            read
-                        )
+                        builder.append(buffer, 0, read)
                     }
 
                     builder.toString()
@@ -1871,214 +993,82 @@ object VaultManager {
             }
 
         } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "Unable to read vault file",
-                e
-            )
-
+            Log.e(TAG, "Unable to read vault file", e)
             null
         }
     }
 
-    /**
-     * Writes and verifies the exact encrypted envelope.
-     *
-     * If verification fails, Athena attempts to restore the
-     * previous encrypted vault contents.
-     */
     private fun writeWithRollback(
         context: Context,
         uri: Uri,
         newContents: String,
         previousContents: String
     ) {
-
-        writeRaw(
-            context,
-            uri,
-            newContents
-        )
-
-        val verify =
-            readTextLimited(
-                context,
-                uri
-            )
-
-        if (
-            verify == newContents
-        ) {
-
-            return
-        }
-
-        Log.e(
-            TAG,
-            "Vault write verification failed; attempting rollback"
-        )
-
+        writeRaw(context, uri, newContents)
+        val verify = readTextLimited(context, uri)
+        if (verify == newContents) return
+        Log.e(TAG, "Vault write verification failed; attempting rollback")
         try {
-
-            writeRaw(
-                context,
-                uri,
-                previousContents
-            )
+            writeRaw(context, uri, previousContents)
 
         } catch (rollbackError: Exception) {
-
-            Log.e(
-                TAG,
-                "Vault rollback also failed",
-                rollbackError
-            )
+            Log.e(TAG, "Vault rollback also failed", rollbackError)
         }
 
-        throw IllegalStateException(
-            "Vault write verification failed"
-        )
+        throw IllegalStateException("Vault write verification failed")
     }
 
-    private fun writeRaw(
-        context: Context,
-        uri: Uri,
-        text: String
-    ) {
-
-        val output =
-            context
-                .contentResolver
-                .openOutputStream(
-                    uri,
-                    "wt"
-                )
-                ?: throw IllegalStateException(
-                    "Unable to open vault file for writing"
-                )
+    private fun writeRaw(context: Context, uri: Uri, text: String) {
+        val output = context.contentResolver.openOutputStream(uri, "wt")
+            ?: throw IllegalStateException("Unable to open vault file for writing")
 
         output.use { stream ->
-
-            OutputStreamWriter(
-                stream,
-                Charsets.UTF_8
-            ).use { writer ->
-
-                writer.write(
-                    text
-                )
-
+            OutputStreamWriter(stream, Charsets.UTF_8).use { writer ->
+                writer.write(text)
                 writer.flush()
             }
         }
     }
 
-    // =============================================================
-    // STRICT JSON KEYS
-    // =============================================================
-
-    private fun hasExactKeys(
-        obj: JSONObject,
-        expected: Set<String>
-    ): Boolean {
-
-        val found =
-            mutableSetOf<String>()
-
-        val iterator =
-            obj.keys()
-
-        while (
-            iterator.hasNext()
-        ) {
-
-            found.add(
-                iterator.next()
-            )
+    private fun hasExactKeys(obj: JSONObject, expected: Set<String>): Boolean {
+        val found = mutableSetOf<String>()
+        val iterator = obj.keys()
+        while (iterator.hasNext()) {
+            found.add(iterator.next())
         }
-
-        return found ==
-                expected
+        return found == expected
     }
 
-    // =============================================================
-    // BASE64
-    // =============================================================
-
-    private fun b64(
-        bytes: ByteArray
-    ): String {
-
-        return Base64.encodeToString(
-            bytes,
-            Base64.NO_WRAP
-        )
+    private fun b64(bytes: ByteArray): String {
+        return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
-    private fun b64d(
-        value: String
-    ): ByteArray {
-
-        return Base64.decode(
-            value,
-            Base64.NO_WRAP
-        )
+    private fun b64d(value: String): ByteArray {
+        return Base64.decode(value, Base64.NO_WRAP)
     }
 
-    private fun decodeB64Exact(
-        value: String,
-        expectedBytes: Int
-    ): ByteArray? {
-
+    private fun decodeB64Exact(value: String, expectedBytes: Int): ByteArray? {
+        val expectedEncodedLength = ((expectedBytes + 2) / 3) * 4
+        if (value.length != expectedEncodedLength) return null
         return try {
-
-            val decoded =
-                b64d(
-                    value
-                )
-
-            if (
-                decoded.size !=
-                expectedBytes
-            ) {
-
+            val decoded = b64d(value)
+            if (decoded.size != expectedBytes) {
                 decoded.fill(0)
-
                 null
-
             } else {
-
                 decoded
             }
 
         } catch (_: Exception) {
-
             null
         }
     }
 
-    // =============================================================
-    // RANDOM
-    // =============================================================
-
-    private fun randomBytes(
-        length: Int
-    ): ByteArray {
-
-        return ByteArray(
-            length
-        ).also {
-
-            secureRandom.nextBytes(
-                it
-            )
+    private fun randomBytes(length: Int): ByteArray {
+        return ByteArray(length).also {
+            secureRandom.nextBytes(it)
         }
     }
-
-    // =============================================================
-    // PARSED TYPES
-    // =============================================================
 
     private data class ParsedKdf(
         val memoryKiB: Int,
@@ -2098,16 +1088,11 @@ object VaultManager {
         val wrappedDek: ParsedCipherBlob,
         val vaultData: ParsedCipherBlob
     ) {
-
         fun wipe() {
-
             vaultId.fill(0)
-
             kdf.salt.fill(0)
-
             wrappedDek.nonce.fill(0)
             wrappedDek.ciphertext.fill(0)
-
             vaultData.nonce.fill(0)
             vaultData.ciphertext.fill(0)
         }

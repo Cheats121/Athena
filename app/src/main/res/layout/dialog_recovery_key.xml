@@ -2,7 +2,6 @@
 
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -19,15 +18,15 @@
             android:layout_width="26dp"
             android:layout_height="26dp"
             android:layout_marginEnd="12dp"
-            android:src="@drawable/ic_lock"
+            android:src="@drawable/password_icon"
             android:tint="@color/accent"
-            android:contentDescription="Authentication required" />
+            android:contentDescription="Recovery key" />
 
         <TextView
             android:id="@+id/dialogTitleText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Authentication required"
+            android:text="Save your recovery key"
             android:textColor="@android:color/white"
             android:textSize="18sp"
             android:fontFamily="@font/poppins"
@@ -40,41 +39,48 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="14dp"
-        android:text="Enter your master password to continue."
+        android:text="Write this key down and keep it somewhere safe. You will need it if you move your vault to another device or reinstall Athena."
         android:textColor="@color/subtleText"
         android:textSize="14sp"
         android:fontFamily="@font/poppins"
         android:lineSpacingExtra="2dp" />
 
-    <com.google.android.material.textfield.TextInputLayout
-        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+    <TextView
+        android:id="@+id/recoveryKeyText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:hintEnabled="false"
         android:layout_marginTop="18dp"
-        app:boxBackgroundMode="outline"
-        app:boxStrokeColor="#8FA3AD"
-        app:boxStrokeWidth="1dp"
-        app:boxStrokeWidthFocused="1dp"
-        app:cursorColor="@android:color/white">
+        android:padding="16dp"
+        android:gravity="center"
+        android:text="ABCDE FGHIJ KLMNO PQRST UVWXY Z1234 56789"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:fontFamily="monospace"
+        android:letterSpacing="0.04"
+        android:lineSpacingExtra="4dp"
+        android:background="@drawable/recovery_key_box"
+        android:textIsSelectable="false" />
 
-        <com.athena.j.athena.SecureEditText
-            android:id="@+id/masterPasswordInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="14dp"
-            android:paddingBottom="14dp"
-            android:fontFamily="@font/poppins"
-            android:hint="Enter Master Password"
-            android:imeOptions="actionDone"
-            android:inputType="textPassword"
-            android:textColor="@android:color/white"
-            android:textColorHint="@color/subtleText"
-            android:textCursorDrawable="@drawable/white_cursor"/>
+    <TextView
+        android:id="@+id/recoveryWarningText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="If you lose both this recovery key and your trusted device, your vault cannot be recovered."
+        android:textColor="@color/subtleText"
+        android:textSize="13sp"
+        android:fontFamily="@font/poppins"
+        android:lineSpacingExtra="2dp" />
 
-    </com.google.android.material.textfield.TextInputLayout>
+    <TextView
+        android:id="@+id/recoveryConfirmText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="Make sure you have saved the key before continuing."
+        android:textColor="@android:color/white"
+        android:textSize="13sp"
+        android:fontFamily="@font/poppins" />
 
     <LinearLayout
         android:id="@+id/buttonRow"
@@ -85,26 +91,12 @@
         android:gravity="end">
 
         <TextView
-            android:id="@+id/cancelButton"
+            android:id="@+id/savedButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingHorizontal="10dp"
             android:paddingVertical="6dp"
-            android:text="CANCEL"
-            android:textAllCaps="true"
-            android:textColor="@color/subtleText"
-            android:textSize="14sp"
-            android:fontFamily="@font/poppins"
-            android:background="?attr/selectableItemBackgroundBorderless" />
-
-        <TextView
-            android:id="@+id/confirmButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="14dp"
-            android:paddingHorizontal="10dp"
-            android:paddingVertical="6dp"
-            android:text="CONFIRM"
+            android:text="I SAVED IT"
             android:textAllCaps="true"
             android:textColor="@color/accent"
             android:textSize="14sp"

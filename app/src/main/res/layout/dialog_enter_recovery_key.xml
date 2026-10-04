@@ -19,15 +19,15 @@
             android:layout_width="26dp"
             android:layout_height="26dp"
             android:layout_marginEnd="12dp"
-            android:src="@drawable/ic_lock"
+            android:src="@drawable/globe_icon"
             android:tint="@color/accent"
-            android:contentDescription="Authentication required" />
+            android:contentDescription="Recovery key required" />
 
         <TextView
             android:id="@+id/dialogTitleText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Authentication required"
+            android:text="Recovery key required"
             android:textColor="@android:color/white"
             android:textSize="18sp"
             android:fontFamily="@font/poppins"
@@ -40,7 +40,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="14dp"
-        android:text="Enter your master password to continue."
+        android:text="Athena does not have this vault's recovery key on this device. Enter the key you saved when the vault was created."
         android:textColor="@color/subtleText"
         android:textSize="14sp"
         android:fontFamily="@font/poppins"
@@ -50,31 +50,58 @@
         style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:hintEnabled="false"
         android:layout_marginTop="18dp"
         app:boxBackgroundMode="outline"
         app:boxStrokeColor="#8FA3AD"
         app:boxStrokeWidth="1dp"
         app:boxStrokeWidthFocused="1dp"
+        app:hintEnabled="false"
         app:cursorColor="@android:color/white">
 
         <com.athena.j.athena.SecureEditText
-            android:id="@+id/masterPasswordInput"
+            android:id="@+id/recoveryKeyInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:hint="Enter Recovery Key"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:paddingTop="14dp"
             android:paddingBottom="14dp"
-            android:fontFamily="@font/poppins"
-            android:hint="Enter Master Password"
+            android:fontFamily="monospace"
+            android:textSize="15sp"
             android:imeOptions="actionDone"
-            android:inputType="textPassword"
+            android:inputType="textVisiblePassword|textNoSuggestions"
             android:textColor="@android:color/white"
             android:textColorHint="@color/subtleText"
-            android:textCursorDrawable="@drawable/white_cursor"/>
+            android:textCursorDrawable="@drawable/white_cursor"
+            android:importantForAutofill="no"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:scrollHorizontally="true" />
 
     </com.google.android.material.textfield.TextInputLayout>
+
+
+    <TextView
+        android:id="@+id/recoveryHelpText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Spaces and line breaks are ignored."
+        android:textColor="@color/subtleText"
+        android:textSize="12sp"
+        android:fontFamily="@font/poppins" />
+
+    <TextView
+        android:id="@+id/recoveryErrorText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:textColor="@android:color/holo_red_light"
+        android:textSize="12sp"
+        android:fontFamily="@font/poppins"
+        android:visibility="gone" />
+
 
     <LinearLayout
         android:id="@+id/buttonRow"
@@ -98,13 +125,13 @@
             android:background="?attr/selectableItemBackgroundBorderless" />
 
         <TextView
-            android:id="@+id/confirmButton"
+            android:id="@+id/unlockButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="14dp"
             android:paddingHorizontal="10dp"
             android:paddingVertical="6dp"
-            android:text="CONFIRM"
+            android:text="UNLOCK"
             android:textAllCaps="true"
             android:textColor="@color/accent"
             android:textSize="14sp"

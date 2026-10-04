@@ -16,97 +16,37 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class VaultAdapterInstrumentedTest {
 
-    // =============================================================
-    // ACTIVITY
-    // =============================================================
-
-    private var scenario:
-            ActivityScenario<MainActivity>? =
-        null
-
-    // =============================================================
-    // SETUP
-    // =============================================================
+    private var scenario: ActivityScenario<MainActivity>? = null
 
     @Before
     fun setup() {
-
-        /*
-         * Start with no unlocked runtime session.
-         *
-         * We only need MainActivity here to supply Athena's actual
-         * Material theme to the adapter layout inflation.
-         */
         VaultRuntimeSession.clear()
 
-        scenario =
-            ActivityScenario.launch(
-                MainActivity::class.java
-            )
-
-        scenario!!
-            .moveToState(
-                Lifecycle.State.RESUMED
-            )
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        scenario!!.moveToState(Lifecycle.State.RESUMED)
     }
-
-    // =============================================================
-    // CLEANUP
-    // =============================================================
 
     @After
     fun cleanup() {
-
         try {
             scenario?.close()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
 
-        scenario =
-            null
-
+        scenario = null
         VaultRuntimeSession.clear()
     }
 
-    // =============================================================
-    // HELPERS
-    // =============================================================
-
-    private fun runOnActivity(
-        action: (
-            MainActivity
-        ) -> Unit
-    ) {
-
-        val activeScenario =
-            scenario
-                ?: throw IllegalStateException(
-                    "ActivityScenario is not initialized"
-                )
+    private fun runOnActivity(action: (MainActivity) -> Unit) {
+        val activeScenario = scenario
+            ?: throw IllegalStateException("ActivityScenario is not initialized")
 
         activeScenario.onActivity { activity ->
-
-            action(
-                activity
-            )
+            action(activity)
         }
     }
 
-    private fun parent(
-        activity: MainActivity
-    ): ViewGroup {
-
-        /*
-         * IMPORTANT:
-         *
-         * Use the Activity context, not targetContext.
-         *
-         * This ensures MaterialCardView receives Athena's
-         * Material/AppCompat theme attributes.
-         */
-        return FrameLayout(
-            activity
-        )
+    private fun parent(activity: MainActivity): ViewGroup {
+        return FrameLayout(activity)
     }
 
     private fun entry(
@@ -114,145 +54,89 @@ class VaultAdapterInstrumentedTest {
         username: String,
         realIndex: Int? = null
     ): JSONObject {
-
         return JSONObject().apply {
+            put("type", "password")
+            put("hostname", hostname)
+            put("username", username)
 
-            put(
-                "type",
-                "password"
-            )
-
-            put(
-                "hostname",
-                hostname
-            )
-
-            put(
-                "username",
-                username
-            )
-
-            if (
-                realIndex != null
-            ) {
-
-                put(
-                    "realIndex",
-                    realIndex
-                )
+            if (realIndex != null) {
+                put("realIndex", realIndex)
             }
         }
     }
 
-    // =============================================================
-    // BASIC COUNT
-    // =============================================================
-
     @Test
     fun adapter_itemCount_matchesInput() {
-
-        val input =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "Amazon",
-                        username = "amazon@example.com"
-                    )
+        val input = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "Amazon",
+                    username = "amazon@example.com"
                 )
+            )
 
-                put(
-                    entry(
-                        hostname = "GitHub",
-                        username = "github@example.com"
-                    )
+            put(
+                entry(
+                    hostname = "GitHub",
+                    username = "github@example.com"
                 )
+            )
 
-                put(
-                    entry(
-                        hostname = "Steam",
-                        username = "steam@example.com"
-                    )
+            put(
+                entry(
+                    hostname = "Steam",
+                    username = "steam@example.com"
                 )
-            }
+            )
+        }
 
-        val adapter =
-            VaultAdapter(
-                emptyList()
-            ) { _, _ -> }
+        val adapter = VaultAdapter(emptyList()) { _, _ -> }
 
-        adapter.updateData(
-            input
-        )
+        adapter.updateData(input)
 
-        assertEquals(
-            3,
-            adapter.itemCount
-        )
+        assertEquals(3, adapter.itemCount)
     }
-
-    // =============================================================
-    // UNFILTERED INDEX
-    // =============================================================
 
     @Test
     fun adapter_withoutExistingRealIndex_assignsVisibleIndex() {
+        var clickedIndex = -1
 
-        var clickedIndex =
-            -1
-
-        val input =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "Amazon",
-                        username = "amazon@example.com"
-                    )
+        val input = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "Amazon",
+                    username = "amazon@example.com"
                 )
+            )
 
-                put(
-                    entry(
-                        hostname = "GitHub",
-                        username = "github@example.com"
-                    )
+            put(
+                entry(
+                    hostname = "GitHub",
+                    username = "github@example.com"
                 )
+            )
 
-                put(
-                    entry(
-                        hostname = "Steam",
-                        username = "steam@example.com"
-                    )
+            put(
+                entry(
+                    hostname = "Steam",
+                    username = "steam@example.com"
                 )
-            }
+            )
+        }
 
         runOnActivity { activity ->
+            val adapter = VaultAdapter(emptyList()) { _, realIndex ->
+                clickedIndex = realIndex
+            }
 
-            val adapter =
-                VaultAdapter(
-                    emptyList()
-                ) { _, realIndex ->
+            adapter.updateData(input)
 
-                    clickedIndex =
-                        realIndex
-                }
-
-            adapter.updateData(
-                input
+            val holder = adapter.onCreateViewHolder(
+                parent(activity),
+                0
             )
 
-            val holder =
-                adapter.onCreateViewHolder(
-                    parent(
-                        activity
-                    ),
-                    0
-                )
-
-            adapter.onBindViewHolder(
-                holder,
-                2
-            )
+            adapter.onBindViewHolder(holder, 2)
 
             holder.itemView.performClick()
         }
@@ -264,75 +148,35 @@ class VaultAdapterInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // CRITICAL FILTERED INDEX TEST
-    // =============================================================
-
     @Test
     fun filteredEntry_preservesOriginalVaultIndex() {
+        var clickedIndex = -1
+        var clickedHostname = ""
 
-        var clickedIndex =
-            -1
-
-        var clickedHostname =
-            ""
-
-        /*
-         * Original encrypted vault:
-         *
-         * 0 -> Amazon
-         * 1 -> GitHub
-         * 2 -> Steam
-         *
-         * After searching for Steam:
-         *
-         * visible position -> 0
-         * real vault index -> 2
-         */
-        val filtered =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "Steam",
-                        username = "steam@example.com",
-                        realIndex = 2
-                    )
+        val filtered = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "Steam",
+                    username = "steam@example.com",
+                    realIndex = 2
                 )
-            }
+            )
+        }
 
         runOnActivity { activity ->
+            val adapter = VaultAdapter(emptyList()) { clickedEntry, realIndex ->
+                clickedIndex = realIndex
+                clickedHostname = clickedEntry.optString("hostname")
+            }
 
-            val adapter =
-                VaultAdapter(
-                    emptyList()
-                ) { clickedEntry, realIndex ->
+            adapter.updateData(filtered)
 
-                    clickedIndex =
-                        realIndex
-
-                    clickedHostname =
-                        clickedEntry.optString(
-                            "hostname"
-                        )
-                }
-
-            adapter.updateData(
-                filtered
-            )
-
-            val holder =
-                adapter.onCreateViewHolder(
-                    parent(
-                        activity
-                    ),
-                    0
-                )
-
-            adapter.onBindViewHolder(
-                holder,
+            val holder = adapter.onCreateViewHolder(
+                parent(activity),
                 0
             )
+
+            adapter.onBindViewHolder(holder, 0)
 
             holder.itemView.performClick()
         }
@@ -349,55 +193,33 @@ class VaultAdapterInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // FIRST DISPLAY POSITION != REAL INDEX
-    // =============================================================
-
     @Test
     fun firstVisibleEntry_canHaveNonZeroRealIndex() {
+        var clickedIndex = -1
 
-        var clickedIndex =
-            -1
-
-        val filtered =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "Target",
-                        username = "target@example.com",
-                        realIndex = 7
-                    )
+        val filtered = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "Target",
+                    username = "target@example.com",
+                    realIndex = 7
                 )
-            }
+            )
+        }
 
         runOnActivity { activity ->
+            val adapter = VaultAdapter(emptyList()) { _, realIndex ->
+                clickedIndex = realIndex
+            }
 
-            val adapter =
-                VaultAdapter(
-                    emptyList()
-                ) { _, realIndex ->
+            adapter.updateData(filtered)
 
-                    clickedIndex =
-                        realIndex
-                }
-
-            adapter.updateData(
-                filtered
-            )
-
-            val holder =
-                adapter.onCreateViewHolder(
-                    parent(
-                        activity
-                    ),
-                    0
-                )
-
-            adapter.onBindViewHolder(
-                holder,
+            val holder = adapter.onCreateViewHolder(
+                parent(activity),
                 0
             )
+
+            adapter.onBindViewHolder(holder, 0)
 
             holder.itemView.performClick()
         }
@@ -409,149 +231,90 @@ class VaultAdapterInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // MULTIPLE FILTERED RESULTS
-    // =============================================================
-
     @Test
     fun multipleFilteredEntries_preserveOriginalIndices() {
+        val clickedIndices = mutableListOf<Int>()
 
-        val clickedIndices =
-            mutableListOf<Int>()
-
-        val filtered =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "GitHub",
-                        username = "one@example.com",
-                        realIndex = 1
-                    )
+        val filtered = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "GitHub",
+                    username = "one@example.com",
+                    realIndex = 1
                 )
-
-                put(
-                    entry(
-                        hostname = "GitLab",
-                        username = "two@example.com",
-                        realIndex = 5
-                    )
-                )
-
-                put(
-                    entry(
-                        hostname = "GitTea",
-                        username = "three@example.com",
-                        realIndex = 9
-                    )
-                )
-            }
-
-        runOnActivity { activity ->
-
-            val adapter =
-                VaultAdapter(
-                    emptyList()
-                ) { _, realIndex ->
-
-                    clickedIndices.add(
-                        realIndex
-                    )
-                }
-
-            adapter.updateData(
-                filtered
             )
 
-            for (
-            position in 0 until adapter.itemCount
-            ) {
-
-                val holder =
-                    adapter.onCreateViewHolder(
-                        parent(
-                            activity
-                        ),
-                        0
-                    )
-
-                adapter.onBindViewHolder(
-                    holder,
-                    position
+            put(
+                entry(
+                    hostname = "GitLab",
+                    username = "two@example.com",
+                    realIndex = 5
                 )
+            )
+
+            put(
+                entry(
+                    hostname = "GitTea",
+                    username = "three@example.com",
+                    realIndex = 9
+                )
+            )
+        }
+
+        runOnActivity { activity ->
+            val adapter = VaultAdapter(emptyList()) { _, realIndex ->
+                clickedIndices.add(realIndex)
+            }
+
+            adapter.updateData(filtered)
+
+            for (position in 0 until adapter.itemCount) {
+                val holder = adapter.onCreateViewHolder(
+                    parent(activity),
+                    0
+                )
+
+                adapter.onBindViewHolder(holder, position)
 
                 holder.itemView.performClick()
             }
         }
 
         assertEquals(
-            listOf(
-                1,
-                5,
-                9
-            ),
+            listOf(1, 5, 9),
             clickedIndices
         )
     }
 
-    // =============================================================
-    // DISPLAY DATA
-    // =============================================================
-
     @Test
     fun bind_displaysCorrectHostnameAndUsername() {
+        var displayedHostname = ""
+        var displayedUsername = ""
 
-        var displayedHostname =
-            ""
-
-        var displayedUsername =
-            ""
-
-        val input =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "GitHub",
-                        username = "test@example.com",
-                        realIndex = 4
-                    )
+        val input = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "GitHub",
+                    username = "test@example.com",
+                    realIndex = 4
                 )
-            }
+            )
+        }
 
         runOnActivity { activity ->
+            val adapter = VaultAdapter(emptyList()) { _, _ -> }
 
-            val adapter =
-                VaultAdapter(
-                    emptyList()
-                ) { _, _ -> }
+            adapter.updateData(input)
 
-            adapter.updateData(
-                input
-            )
-
-            val holder =
-                adapter.onCreateViewHolder(
-                    parent(
-                        activity
-                    ),
-                    0
-                )
-
-            adapter.onBindViewHolder(
-                holder,
+            val holder = adapter.onCreateViewHolder(
+                parent(activity),
                 0
             )
 
-            displayedHostname =
-                holder.hostname
-                    .text
-                    .toString()
+            adapter.onBindViewHolder(holder, 0)
 
-            displayedUsername =
-                holder.username
-                    .text
-                    .toString()
+            displayedHostname = holder.hostname.text.toString()
+            displayedUsername = holder.username.text.toString()
         }
 
         assertEquals(
@@ -565,82 +328,50 @@ class VaultAdapterInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // EMPTY ARRAY
-    // =============================================================
-
     @Test
     fun emptyInput_resultsInZeroItems() {
+        val adapter = VaultAdapter(emptyList()) { _, _ -> }
 
-        val adapter =
-            VaultAdapter(
-                emptyList()
-            ) { _, _ -> }
+        adapter.updateData(JSONArray())
 
-        adapter.updateData(
-            JSONArray()
-        )
-
-        assertEquals(
-            0,
-            adapter.itemCount
-        )
+        assertEquals(0, adapter.itemCount)
     }
-
-    // =============================================================
-    // UPDATE REPLACES OLD DATA
-    // =============================================================
 
     @Test
     fun updateData_replacesPreviousEntries() {
-
-        val first =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "Amazon",
-                        username = "a@example.com"
-                    )
+        val first = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "Amazon",
+                    username = "a@example.com"
                 )
+            )
 
-                put(
-                    entry(
-                        hostname = "GitHub",
-                        username = "g@example.com"
-                    )
+            put(
+                entry(
+                    hostname = "GitHub",
+                    username = "g@example.com"
                 )
-            }
+            )
+        }
 
-        val second =
-            JSONArray().apply {
-
-                put(
-                    entry(
-                        hostname = "Steam",
-                        username = "s@example.com",
-                        realIndex = 7
-                    )
+        val second = JSONArray().apply {
+            put(
+                entry(
+                    hostname = "Steam",
+                    username = "s@example.com",
+                    realIndex = 7
                 )
-            }
+            )
+        }
 
-        val adapter =
-            VaultAdapter(
-                emptyList()
-            ) { _, _ -> }
+        val adapter = VaultAdapter(emptyList()) { _, _ -> }
 
-        adapter.updateData(
-            first
-        )
+        adapter.updateData(first)
 
-        assertEquals(
-            2,
-            adapter.itemCount
-        )
+        assertEquals(2, adapter.itemCount)
 
-        adapter.updateData(
-            second
-        )
+        adapter.updateData(second)
 
         assertEquals(
             "updateData() should replace previous contents",

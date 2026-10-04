@@ -73,7 +73,7 @@
                     android:layout_gravity="center_horizontal"
                     android:layout_marginTop="2dp"
                     android:fontFamily="@font/poppins"
-                    android:text="v1.0.0"
+                    android:text="v2.0"
                     android:textColor="@color/subtleText"
                     android:textSize="13sp" />
 
@@ -120,7 +120,7 @@
                             android:layout_marginTop="8dp"
                             android:fontFamily="@font/poppins"
                             android:lineSpacingExtra="2dp"
-                            android:text="Version: v1.0.0&#10;Build: 1&#10;Installer: Unknown"
+                            android:text="Version: v2.0.0&#10;Build: 1&#10;Installer: Unknown"
                             android:textColor="#B3FFFFFF"
                             android:textSize="13sp" />
 

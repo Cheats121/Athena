@@ -2,6 +2,7 @@ package com.athena.j.athena
 
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONArray
@@ -15,169 +16,103 @@ import java.io.File
 @RunWith(AndroidJUnit4::class)
 class VaultManagerInstrumentedTest {
 
-    // =============================================================
-    // CONTEXT
-    // =============================================================
-
     private val context: Context
-        get() =
-            InstrumentationRegistry
-                .getInstrumentation()
-                .targetContext
+        get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    // =============================================================
-    // TEST FILE TRACKING
-    // =============================================================
-
-    private val temporaryFiles =
-        mutableListOf<File>()
-
-    // =============================================================
-    // HELPERS
-    // =============================================================
+    private val temporaryFiles = mutableListOf<File>()
+    private val recoveryKeys = mutableListOf<ByteArray>()
 
     private fun createTempVaultUri(): Uri {
-
-        val file =
-            File(
-                context.cacheDir,
-                "test-vault-${System.nanoTime()}.json"
-            )
+        val file = File(
+            context.cacheDir,
+            "test-vault-${System.nanoTime()}.json"
+        )
 
         file.createNewFile()
+        temporaryFiles.add(file)
 
-        temporaryFiles.add(
-            file
-        )
-
-        return Uri.fromFile(
-            file
-        )
+        return Uri.fromFile(file)
     }
 
-    private fun fileFromUri(
-        uri: Uri
-    ): File {
-
-        val path =
-            requireNotNull(
-                uri.path
-            ) {
-                "Test URI has no file path"
-            }
-
-        return File(
-            path
-        )
+    private fun createRecoveryKey(): ByteArray {
+        val key = VaultManager.generateRecoveryKey()
+        recoveryKeys.add(key)
+        return key
     }
 
-    private fun readVaultJson(
-        uri: Uri
-    ): JSONObject {
+    private fun fileFromUri(uri: Uri): File {
+        val path = requireNotNull(uri.path) {
+            "Test URI has no file path"
+        }
 
-        val file =
-            fileFromUri(
-                uri
-            )
-
-        return JSONObject(
-            file.readText()
-        )
+        return File(path)
     }
 
-    private fun writeVaultJson(
-        uri: Uri,
-        root: JSONObject
-    ) {
-
-        fileFromUri(
-            uri
-        ).writeText(
-            root.toString()
-        )
+    private fun readVaultJson(uri: Uri): JSONObject {
+        val file = fileFromUri(uri)
+        return JSONObject(file.readText())
     }
 
-    /**
-     * Changes one Base64 character while keeping the value
-     * syntactically valid Base64.
-     */
-    private fun mutateBase64(
-        value: String
-    ): String {
+    private fun writeVaultJson(uri: Uri, root: JSONObject) {
+        fileFromUri(uri).writeText(root.toString())
+    }
 
-        require(
-            value.isNotEmpty()
-        )
+    private fun mutateBase64(value: String): String {
+        require(value.isNotEmpty())
 
         val replacement =
-            if (
-                value[0] == 'A'
-            ) {
+            if (value[0] == 'A') {
                 'B'
             } else {
                 'A'
             }
 
-        return replacement +
-                value.substring(
-                    1
-                )
+        return replacement + value.substring(1)
     }
-
-    // =============================================================
-    // CLEANUP
-    // =============================================================
 
     @After
     fun cleanup() {
-
-        /*
-         * Ensure no test leaves an unlocked DEK behind.
-         */
         VaultRuntimeSession.clear()
 
-        /*
-         * Remove all temporary vault files.
-         */
-        temporaryFiles.forEach { file ->
+        recoveryKeys.forEach { key ->
+            try {
+                key.fill(0)
+            } catch (_: Exception) {}
+        }
 
+        recoveryKeys.clear()
+
+        temporaryFiles.forEach { file ->
             try {
                 file.delete()
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
         }
 
         temporaryFiles.clear()
     }
 
-    // =============================================================
-    // CREATE / UNLOCK
-    // =============================================================
-
     @Test
-    fun createVault_correctPassword_unlocksSuccessfully() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "TestPassword!123"
+    fun createVault_correctPasswordAndRecoveryKey_unlocksSuccessfully() {
+        val uri = createTempVaultUri()
+        val password = "TestPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val dek =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
+        val dek = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
 
         assertNotNull(
-            "Correct master password should return the vault DEK",
+            "Correct password and recovery key should return vault DEK",
             dek
         )
 
@@ -190,28 +125,24 @@ class VaultManagerInstrumentedTest {
         dek.fill(0)
     }
 
-    // =============================================================
-    // WRONG PASSWORD
-    // =============================================================
-
     @Test
     fun unlockVault_wrongPassword_fails() {
-
-        val uri =
-            createTempVaultUri()
+        val uri = createTempVaultUri()
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            "CorrectPassword!123"
+            context = context,
+            uri = uri,
+            password = "CorrectPassword!123",
+            recoveryKey = recoveryKey
         )
 
-        val dek =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                "WrongPassword!123"
-            )
+        val dek = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = "WrongPassword!123",
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Wrong master password must not produce a DEK",
@@ -219,192 +150,172 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // SAVE / LOAD ROUND TRIP
-    // =============================================================
+    @Test
+    fun unlockVault_wrongRecoveryKey_fails() {
+        val uri = createTempVaultUri()
+        val correctRecoveryKey = createRecoveryKey()
+        val wrongRecoveryKey = createRecoveryKey()
+        val password = "CorrectPassword!123"
+
+        VaultManager.createVault(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = correctRecoveryKey
+        )
+
+        val dek = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = wrongRecoveryKey
+        )
+
+        assertNull(
+            "Correct password with wrong recovery key must not produce a DEK",
+            dek
+        )
+    }
+
+    @Test
+    fun recoveryKey_isNotStoredInsideVaultFile() {
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
+
+        VaultManager.createVault(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
+
+        val raw = fileFromUri(uri).readText()
+
+        val standardBase64 = Base64.encodeToString(
+            recoveryKey,
+            Base64.NO_WRAP
+        )
+
+        val urlSafeBase64 = Base64.encodeToString(
+            recoveryKey,
+            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+        )
+
+        assertFalse(
+            "Raw recovery key must never appear in vault JSON",
+            raw.contains(standardBase64)
+        )
+
+        assertFalse(
+            "URL-safe recovery key must never appear in vault JSON",
+            raw.contains(urlSafeBase64)
+        )
+
+        assertFalse(
+            "Vault envelope must not contain a recoveryKey field",
+            raw.contains("\"recoveryKey\"")
+        )
+    }
 
     @Test
     fun saveThenLoad_preservesCredential() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val dek =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
+        val dek = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
+
+        assertNotNull(dek)
+
+        val vault = JSONArray().apply {
+            put(
+                JSONObject().apply {
+                    put("type", "password")
+                    put("hostname", "github.com")
+                    put("username", "test@example.com")
+                    put("password", "secret123")
+                    put("created", 123456789L)
+                    put("updated", 123456789L)
+                }
             )
-
-        assertNotNull(
-            dek
-        )
-
-        val vault =
-            JSONArray().apply {
-
-                put(
-                    JSONObject().apply {
-
-                        put(
-                            "type",
-                            "password"
-                        )
-
-                        put(
-                            "hostname",
-                            "github.com"
-                        )
-
-                        put(
-                            "username",
-                            "test@example.com"
-                        )
-
-                        put(
-                            "password",
-                            "secret123"
-                        )
-
-                        put(
-                            "created",
-                            123456789L
-                        )
-
-                        put(
-                            "updated",
-                            123456789L
-                        )
-                    }
-                )
-            }
+        }
 
         try {
-
             VaultManager.saveVaultWithKey(
-                context,
-                uri,
-                vault,
-                dek!!
+                context = context,
+                uri = uri,
+                entries = vault,
+                vaultKey = dek!!
             )
 
-            val loaded =
-                VaultManager.loadVaultWithKey(
-                    context,
-                    uri,
-                    dek
-                )
+            val loaded = VaultManager.loadVaultWithKey(
+                context = context,
+                uri = uri,
+                vaultKey = dek
+            )
 
             assertNotNull(
-                "Saved vault should decrypt with the correct DEK",
+                "Saved vault should decrypt with correct DEK",
                 loaded
             )
 
-            assertEquals(
-                1,
-                loaded!!.length()
-            )
+            assertEquals(1, loaded!!.length())
 
-            val entry =
-                loaded.getJSONObject(
-                    0
-                )
+            val entry = loaded.getJSONObject(0)
 
-            assertEquals(
-                "password",
-                entry.getString(
-                    "type"
-                )
-            )
-
-            assertEquals(
-                "github.com",
-                entry.getString(
-                    "hostname"
-                )
-            )
-
-            assertEquals(
-                "test@example.com",
-                entry.getString(
-                    "username"
-                )
-            )
-
-            assertEquals(
-                "secret123",
-                entry.getString(
-                    "password"
-                )
-            )
+            assertEquals("password", entry.getString("type"))
+            assertEquals("github.com", entry.getString("hostname"))
+            assertEquals("test@example.com", entry.getString("username"))
+            assertEquals("secret123", entry.getString("password"))
 
         } finally {
-
             dek?.fill(0)
         }
     }
 
-    // =============================================================
-    // VAULT CIPHERTEXT TAMPERING
-    // =============================================================
-
     @Test
     fun modifiedVaultCiphertext_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
-
-        val vault =
-            root.getJSONObject(
-                "vault"
-            )
-
-        val ciphertext =
-            vault.getString(
-                "ciphertext"
-            )
+        val root = readVaultJson(uri)
+        val vault = root.getJSONObject("vault")
+        val ciphertext = vault.getString("ciphertext")
 
         vault.put(
             "ciphertext",
-            mutateBase64(
-                ciphertext
-            )
+            mutateBase64(ciphertext)
         )
 
-        writeVaultJson(
-            uri,
-            root
-        )
+        writeVaultJson(uri, root)
 
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Modified vault ciphertext must fail authentication",
@@ -412,55 +323,35 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // VAULT NONCE TAMPERING
-    // =============================================================
-
     @Test
     fun modifiedVaultNonce_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
-
-        val vault =
-            root.getJSONObject(
-                "vault"
-            )
+        val root = readVaultJson(uri)
+        val vault = root.getJSONObject("vault")
 
         vault.put(
             "nonce",
-            mutateBase64(
-                vault.getString(
-                    "nonce"
-                )
-            )
+            mutateBase64(vault.getString("nonce"))
         )
 
-        writeVaultJson(
-            uri,
-            root
-        )
+        writeVaultJson(uri, root)
 
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Modified vault nonce must fail authentication",
@@ -468,55 +359,35 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // WRAPPED DEK TAMPERING
-    // =============================================================
-
     @Test
     fun modifiedWrappedDekCiphertext_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
-
-        val wrappedDek =
-            root.getJSONObject(
-                "wrappedDek"
-            )
+        val root = readVaultJson(uri)
+        val wrappedDek = root.getJSONObject("wrappedDek")
 
         wrappedDek.put(
             "ciphertext",
-            mutateBase64(
-                wrappedDek.getString(
-                    "ciphertext"
-                )
-            )
+            mutateBase64(wrappedDek.getString("ciphertext"))
         )
 
-        writeVaultJson(
-            uri,
-            root
-        )
+        writeVaultJson(uri, root)
 
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Modified wrapped DEK must fail authentication",
@@ -524,55 +395,35 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // WRAPPED DEK NONCE TAMPERING
-    // =============================================================
-
     @Test
     fun modifiedWrappedDekNonce_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
-
-        val wrappedDek =
-            root.getJSONObject(
-                "wrappedDek"
-            )
+        val root = readVaultJson(uri)
+        val wrappedDek = root.getJSONObject("wrappedDek")
 
         wrappedDek.put(
             "nonce",
-            mutateBase64(
-                wrappedDek.getString(
-                    "nonce"
-                )
-            )
+            mutateBase64(wrappedDek.getString("nonce"))
         )
 
-        writeVaultJson(
-            uri,
-            root
-        )
+        writeVaultJson(uri, root)
 
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Modified wrapped DEK nonce must fail authentication",
@@ -580,50 +431,34 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // VAULT ID TAMPERING
-    // =============================================================
-
     @Test
     fun modifiedVaultId_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
         root.put(
             "vaultId",
-            mutateBase64(
-                root.getString(
-                    "vaultId"
-                )
-            )
+            mutateBase64(root.getString("vaultId"))
         )
 
-        writeVaultJson(
-            uri,
-            root
-        )
+        writeVaultJson(uri, root)
 
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Modified vault ID must invalidate authenticated metadata",
@@ -631,46 +466,31 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // INVALID VERSION
-    // =============================================================
-
     @Test
     fun unsupportedVaultVersion_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root.put(
-            "version",
-            999
+        root.put("version", 999)
+
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        writeVaultJson(
-            uri,
-            root
-        )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Unsupported vault versions must be rejected",
@@ -678,46 +498,31 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // WRONG FORMAT NAME
-    // =============================================================
-
     @Test
     fun invalidFormatName_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root.put(
-            "format",
-            "not-athena"
+        root.put("format", "not-athena")
+
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        writeVaultJson(
-            uri,
-            root
-        )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Unknown vault format must be rejected",
@@ -725,45 +530,31 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // MISSING REQUIRED KEY
-    // =============================================================
-
     @Test
     fun missingRequiredEnvelopeKey_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root.remove(
-            "wrappedDek"
+        root.remove("wrappedDek")
+
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        writeVaultJson(
-            uri,
-            root
-        )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Vault missing a required envelope key must be rejected",
@@ -771,46 +562,34 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // UNEXPECTED EXTRA KEY
-    // =============================================================
-
     @Test
     fun unexpectedEnvelopeKey_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
         root.put(
             "unexpectedField",
             "malicious"
         )
 
-        writeVaultJson(
-            uri,
-            root
-        )
+        writeVaultJson(uri, root)
 
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Unexpected envelope fields must be rejected",
@@ -818,78 +597,55 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // INVALID BASE64
-    // =============================================================
-
     @Test
     fun invalidBase64VaultId_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
         root.put(
             "vaultId",
             "%%%NOT_BASE64%%%"
         )
 
-        writeVaultJson(
-            uri,
-            root
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
-
         assertNull(
-            "Invalid Base64 must be rejected without opening the vault",
+            "Invalid Base64 must be rejected without opening vault",
             result
         )
     }
 
-    // =============================================================
-    // MALFORMED JSON
-    // =============================================================
-
     @Test
     fun malformedJson_isRejectedWithoutCrash() {
+        val uri = createTempVaultUri()
+        val recoveryKey = createRecoveryKey()
+        val file = fileFromUri(uri)
 
-        val uri =
-            createTempVaultUri()
+        file.writeText("{ this is not valid json")
 
-        val file =
-            fileFromUri(
-                uri
-            )
-
-        file.writeText(
-            "{ this is not valid json"
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = "Password!123",
+            recoveryKey = recoveryKey
         )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                "Password!123"
-            )
 
         assertNull(
             "Malformed vault data must be rejected",
@@ -897,22 +653,17 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // EMPTY VAULT FILE
-    // =============================================================
-
     @Test
     fun emptyVaultFile_isRejected() {
+        val uri = createTempVaultUri()
+        val recoveryKey = createRecoveryKey()
 
-        val uri =
-            createTempVaultUri()
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                "Password!123"
-            )
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = "Password!123",
+            recoveryKey = recoveryKey
+        )
 
         assertNull(
             "Empty vault file must not authenticate",
@@ -920,50 +671,32 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // ARGON2 MEMORY - TOO HIGH
-    // =============================================================
-
     @Test
     fun excessiveArgonMemory_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root
-            .getJSONObject(
-                "kdf"
-            )
-            .put(
-                "memoryKiB",
-                999_999_999
-            )
+        root.getJSONObject("kdf")
+            .put("memoryKiB", 999_999_999)
 
-        writeVaultJson(
-            uri,
-            root
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Attacker-controlled excessive Argon2 memory must be rejected",
@@ -971,50 +704,32 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // ARGON2 MEMORY - TOO LOW
-    // =============================================================
-
     @Test
     fun insufficientArgonMemory_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root
-            .getJSONObject(
-                "kdf"
-            )
-            .put(
-                "memoryKiB",
-                1
-            )
+        root.getJSONObject("kdf")
+            .put("memoryKiB", 1)
 
-        writeVaultJson(
-            uri,
-            root
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Unsafe Argon2 memory settings must be rejected",
@@ -1022,50 +737,32 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // ARGON2 ITERATIONS
-    // =============================================================
-
     @Test
     fun excessiveArgonIterations_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root
-            .getJSONObject(
-                "kdf"
-            )
-            .put(
-                "iterations",
-                999_999
-            )
+        root.getJSONObject("kdf")
+            .put("iterations", 999_999)
 
-        writeVaultJson(
-            uri,
-            root
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Excessive Argon2 iteration count must be rejected",
@@ -1075,44 +772,30 @@ class VaultManagerInstrumentedTest {
 
     @Test
     fun zeroArgonIterations_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root
-            .getJSONObject(
-                "kdf"
-            )
-            .put(
-                "iterations",
-                0
-            )
+        root.getJSONObject("kdf")
+            .put("iterations", 0)
 
-        writeVaultJson(
-            uri,
-            root
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Zero Argon2 iterations must be rejected",
@@ -1120,50 +803,32 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // ARGON2 PARALLELISM
-    // =============================================================
-
     @Test
     fun excessiveArgonParallelism_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root
-            .getJSONObject(
-                "kdf"
-            )
-            .put(
-                "parallelism",
-                999
-            )
+        root.getJSONObject("kdf")
+            .put("parallelism", 999)
 
-        writeVaultJson(
-            uri,
-            root
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Excessive Argon2 parallelism must be rejected",
@@ -1173,44 +838,30 @@ class VaultManagerInstrumentedTest {
 
     @Test
     fun zeroArgonParallelism_isRejected() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val root =
-            readVaultJson(
-                uri
-            )
+        val root = readVaultJson(uri)
 
-        root
-            .getJSONObject(
-                "kdf"
-            )
-            .put(
-                "parallelism",
-                0
-            )
+        root.getJSONObject("kdf")
+            .put("parallelism", 0)
 
-        writeVaultJson(
-            uri,
-            root
+        writeVaultJson(uri, root)
+
+        val result = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
-
-        val result =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
 
         assertNull(
             "Zero Argon2 parallelism must be rejected",
@@ -1218,40 +869,29 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // WRONG DEK CANNOT READ VAULT
-    // =============================================================
-
     @Test
     fun loadVaultWithWrongDek_fails() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "StrongMasterPassword!123"
+        val uri = createTempVaultUri()
+        val password = "StrongMasterPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val wrongDek =
-            ByteArray(
-                32
-            ) {
-                0x42.toByte()
-            }
+        val wrongDek = ByteArray(32) {
+            0x42.toByte()
+        }
 
         try {
-
-            val result =
-                VaultManager.loadVaultWithKey(
-                    context,
-                    uri,
-                    wrongDek
-                )
+            val result = VaultManager.loadVaultWithKey(
+                context = context,
+                uri = uri,
+                vaultKey = wrongDek
+            )
 
             assertNull(
                 "Wrong DEK must not decrypt vault contents",
@@ -1259,173 +899,116 @@ class VaultManagerInstrumentedTest {
             )
 
         } finally {
-
             wrongDek.fill(0)
         }
     }
 
-    // =============================================================
-    // WRONG DEK CANNOT OVERWRITE VAULT
-    // =============================================================
-
     @Test
     fun saveWithWrongDek_doesNotOverwriteVault() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "CorrectPassword!123"
+        val uri = createTempVaultUri()
+        val password = "CorrectPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val file =
-            fileFromUri(
-                uri
+        val file = fileFromUri(uri)
+        val original = file.readText()
+
+        val wrongDek = ByteArray(32) {
+            0x42.toByte()
+        }
+
+        val entries = JSONArray().apply {
+            put(
+                JSONObject().apply {
+                    put("type", "password")
+                    put("hostname", "evil.example")
+                    put("username", "attacker")
+                    put("password", "evil")
+                }
             )
+        }
 
-        val original =
-            file.readText()
-
-        val wrongDek =
-            ByteArray(
-                32
-            ) {
-                0x42.toByte()
-            }
-
-        val entries =
-            JSONArray().apply {
-
-                put(
-                    JSONObject().apply {
-
-                        put(
-                            "type",
-                            "password"
-                        )
-
-                        put(
-                            "hostname",
-                            "evil.example"
-                        )
-
-                        put(
-                            "username",
-                            "attacker"
-                        )
-
-                        put(
-                            "password",
-                            "evil"
-                        )
-                    }
-                )
-            }
-
-        var exceptionThrown =
-            false
+        var exceptionThrown = false
 
         try {
-
             VaultManager.saveVaultWithKey(
-                context,
-                uri,
-                entries,
-                wrongDek
+                context = context,
+                uri = uri,
+                entries = entries,
+                vaultKey = wrongDek
             )
 
         } catch (_: Exception) {
-
-            exceptionThrown =
-                true
+            exceptionThrown = true
 
         } finally {
-
             wrongDek.fill(0)
         }
 
         assertTrue(
-            "Saving with the wrong DEK should fail",
+            "Saving with wrong DEK should fail",
             exceptionThrown
         )
 
-        val after =
-            file.readText()
+        val after = file.readText()
 
         assertEquals(
-            "Wrong DEK must not alter the original encrypted vault",
+            "Wrong DEK must not alter original encrypted vault",
             original,
             after
         )
     }
 
-    // =============================================================
-    // CORRECT DEK STILL WORKS AFTER WRONG DEK ATTEMPT
-    // =============================================================
-
     @Test
     fun failedWrongDekSave_doesNotCorruptOriginalVault() {
-
-        val uri =
-            createTempVaultUri()
-
-        val password =
-            "CorrectPassword!123"
+        val uri = createTempVaultUri()
+        val password = "CorrectPassword!123"
+        val recoveryKey = createRecoveryKey()
 
         VaultManager.createVault(
-            context,
-            uri,
-            password
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val realDek =
-            VaultManager.deriveVaultKey(
-                context,
-                uri,
-                password
-            )
-
-        assertNotNull(
-            realDek
+        val realDek = VaultManager.deriveVaultKey(
+            context = context,
+            uri = uri,
+            password = password,
+            recoveryKey = recoveryKey
         )
 
-        val wrongDek =
-            ByteArray(
-                32
-            ) {
-                0x33.toByte()
-            }
+        assertNotNull(realDek)
+
+        val wrongDek = ByteArray(32) {
+            0x33.toByte()
+        }
 
         try {
-
             try {
-
                 VaultManager.saveVaultWithKey(
-                    context,
-                    uri,
-                    JSONArray(),
-                    wrongDek
+                    context = context,
+                    uri = uri,
+                    entries = JSONArray(),
+                    vaultKey = wrongDek
                 )
 
-                fail(
-                    "Expected wrong-DEK save to fail"
-                )
+                fail("Expected wrong-DEK save to fail")
 
-            } catch (_: Exception) {
-                // Expected.
-            }
+            } catch (_: Exception) {}
 
-            val loaded =
-                VaultManager.loadVaultWithKey(
-                    context,
-                    uri,
-                    realDek!!
-                )
+            val loaded = VaultManager.loadVaultWithKey(
+                context = context,
+                uri = uri,
+                vaultKey = realDek!!
+            )
 
             assertNotNull(
                 "Original vault must remain readable using its real DEK",
@@ -1433,104 +1016,105 @@ class VaultManagerInstrumentedTest {
             )
 
         } finally {
-
             wrongDek.fill(0)
             realDek?.fill(0)
         }
     }
 
-    // =============================================================
-    // RUNTIME SESSION - INPUT COPY
-    // =============================================================
+    @Test
+    fun getVaultId_returnsStableDefensiveCopy() {
+        val uri = createTempVaultUri()
+        val recoveryKey = createRecoveryKey()
+
+        VaultManager.createVault(
+            context = context,
+            uri = uri,
+            password = "Password!123",
+            recoveryKey = recoveryKey
+        )
+
+        val first = VaultManager.getVaultId(
+            context = context,
+            uri = uri
+        )
+
+        val second = VaultManager.getVaultId(
+            context = context,
+            uri = uri
+        )
+
+        assertNotNull(first)
+        assertNotNull(second)
+
+        assertEquals(16, first!!.size)
+
+        assertArrayEquals(
+            "Vault ID should remain stable for the same vault",
+            first,
+            second
+        )
+
+        first.fill(0)
+
+        val third = VaultManager.getVaultId(
+            context = context,
+            uri = uri
+        )
+
+        assertNotNull(third)
+
+        assertFalse(
+            "Mutating returned vault ID must not alter stored vault ID",
+            third!!.all { it.toInt() == 0 }
+        )
+
+        second?.fill(0)
+        third.fill(0)
+    }
 
     @Test
     fun session_copiesInputDek() {
+        val uri = Uri.parse("content://athena/test")
 
-        val uri =
-            Uri.parse(
-                "content://athena/test"
-            )
+        val original = ByteArray(32) {
+            7
+        }
 
-        val original =
-            ByteArray(
-                32
-            ) {
-                7
-            }
+        VaultRuntimeSession.setSession(uri, original)
 
-        VaultRuntimeSession.setSession(
-            uri,
-            original
-        )
-
-        /*
-         * Destroy the caller's copy.
-         */
         original.fill(0)
 
-        val stored =
-            VaultRuntimeSession
-                .getVaultDek()
+        val stored = VaultRuntimeSession.getVaultDek()
 
-        assertNotNull(
-            stored
-        )
+        assertNotNull(stored)
 
         assertTrue(
             "Runtime session must retain its own defensive DEK copy",
-            stored!!.all {
-                it.toInt() == 7
-            }
+            stored!!.all { it.toInt() == 7 }
         )
 
         stored.fill(0)
     }
 
-    // =============================================================
-    // RUNTIME SESSION - OUTPUT COPY
-    // =============================================================
-
     @Test
     fun getVaultDek_returnsCopy() {
+        val uri = Uri.parse("content://athena/test")
 
-        val uri =
-            Uri.parse(
-                "content://athena/test"
-            )
+        val dek = ByteArray(32) {
+            5
+        }
 
-        val dek =
-            ByteArray(
-                32
-            ) {
-                5
-            }
+        VaultRuntimeSession.setSession(uri, dek)
 
-        VaultRuntimeSession.setSession(
-            uri,
-            dek
-        )
+        val first = VaultRuntimeSession.getVaultDek()!!
 
-        val first =
-            VaultRuntimeSession
-                .getVaultDek()!!
-
-        /*
-         * Destroy the returned array.
-         *
-         * If VaultRuntimeSession exposed its internal array,
-         * this would destroy the authoritative session DEK.
-         */
         first.fill(0)
 
-        val second =
-            VaultRuntimeSession
-                .getVaultDek()!!
+        val second = VaultRuntimeSession.getVaultDek()!!
 
         assertTrue(
-            "Modifying one returned DEK must not modify the internal DEK",
-            second.all {
-                it.toInt() == 5
-            }
+            "Modifying returned DEK must not modify internal DEK",
+            second.all { it.toInt() == 5 }
         )
 
         first.fill(0)
@@ -1538,29 +1122,15 @@ class VaultManagerInstrumentedTest {
         dek.fill(0)
     }
 
-    // =============================================================
-    // RUNTIME SESSION - CLEAR
-    // =============================================================
-
     @Test
     fun clearSession_locksVault() {
+        val uri = Uri.parse("content://athena/test")
 
-        val uri =
-            Uri.parse(
-                "content://athena/test"
-            )
+        val dek = ByteArray(32) {
+            9
+        }
 
-        val dek =
-            ByteArray(
-                32
-            ) {
-                9
-            }
-
-        VaultRuntimeSession.setSession(
-            uri,
-            dek
-        )
+        VaultRuntimeSession.setSession(uri, dek)
 
         dek.fill(0)
 
@@ -1569,13 +1139,8 @@ class VaultManagerInstrumentedTest {
             VaultRuntimeSession.isUnlocked()
         )
 
-        assertNotNull(
-            VaultRuntimeSession.getVaultUri()
-        )
-
-        assertNotNull(
-            VaultRuntimeSession.getVaultDek()
-        )
+        assertNotNull(VaultRuntimeSession.getVaultUri())
+        assertNotNull(VaultRuntimeSession.getVaultDek())
 
         VaultRuntimeSession.clear()
 
@@ -1595,46 +1160,21 @@ class VaultManagerInstrumentedTest {
         )
     }
 
-    // =============================================================
-    // REPLACING SESSION
-    // =============================================================
-
     @Test
     fun setSession_replacesPreviousSession() {
+        val firstUri = Uri.parse("content://athena/first")
+        val secondUri = Uri.parse("content://athena/second")
 
-        val firstUri =
-            Uri.parse(
-                "content://athena/first"
-            )
+        val firstDek = ByteArray(32) {
+            1
+        }
 
-        val secondUri =
-            Uri.parse(
-                "content://athena/second"
-            )
+        val secondDek = ByteArray(32) {
+            2
+        }
 
-        val firstDek =
-            ByteArray(
-                32
-            ) {
-                1
-            }
-
-        val secondDek =
-            ByteArray(
-                32
-            ) {
-                2
-            }
-
-        VaultRuntimeSession.setSession(
-            firstUri,
-            firstDek
-        )
-
-        VaultRuntimeSession.setSession(
-            secondUri,
-            secondDek
-        )
+        VaultRuntimeSession.setSession(firstUri, firstDek)
+        VaultRuntimeSession.setSession(secondUri, secondDek)
 
         firstDek.fill(0)
         secondDek.fill(0)
@@ -1644,19 +1184,13 @@ class VaultManagerInstrumentedTest {
             VaultRuntimeSession.getVaultUri()
         )
 
-        val activeDek =
-            VaultRuntimeSession
-                .getVaultDek()
+        val activeDek = VaultRuntimeSession.getVaultDek()
 
-        assertNotNull(
-            activeDek
-        )
+        assertNotNull(activeDek)
 
         assertTrue(
-            "New session must contain the replacement DEK",
-            activeDek!!.all {
-                it.toInt() == 2
-            }
+            "New session must contain replacement DEK",
+            activeDek!!.all { it.toInt() == 2 }
         )
 
         activeDek.fill(0)

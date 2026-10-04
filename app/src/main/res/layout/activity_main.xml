@@ -46,7 +46,8 @@
             android:textColor="@android:color/white"
             android:textColorHint="#80FFFFFF"
             android:fontFamily="@font/poppins"
-            android:layout_marginBottom="12dp" />
+            android:layout_marginBottom="12dp"
+            android:textCursorDrawable="@drawable/white_cursor"/>
 
         <Button
             android:id="@+id/loginButton"
