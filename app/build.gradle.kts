@@ -11,10 +11,6 @@ android {
     compileSdk =
         36
 
-    // =============================================================
-    // DEFAULT CONFIG
-    // =============================================================
-
     defaultConfig {
 
         applicationId =
@@ -27,18 +23,14 @@ android {
             36
 
         versionCode =
-            2
+            3
 
         versionName =
-            "1.1"
+            "2.1"
 
         testInstrumentationRunner =
             "androidx.test.runner.AndroidJUnitRunner"
     }
-
-    // =============================================================
-    // BUILD TYPES
-    // =============================================================
 
     buildTypes {
 
@@ -68,10 +60,6 @@ android {
         }
     }
 
-    // =============================================================
-    // JAVA / KOTLIN
-    // =============================================================
-
     compileOptions {
 
         sourceCompatibility =
@@ -90,9 +78,6 @@ android {
 
 dependencies {
 
-    // =============================================================
-    // ANDROID
-    // =============================================================
 
     implementation(
         libs.appcompat
@@ -110,10 +95,6 @@ dependencies {
         libs.lifecycle.runtime.ktx
     )
 
-    // =============================================================
-    // SECURITY / CRYPTOGRAPHY
-    // =============================================================
-
     implementation(
         "org.bouncycastle:bcprov-jdk18on:1.78.1"
     )
@@ -126,23 +107,13 @@ dependencies {
         "androidx.biometric:biometric-ktx:1.4.0-alpha02"
     )
 
-    // =============================================================
-    // STORAGE
-    // =============================================================
-
     implementation(
         "androidx.documentfile:documentfile:1.0.1"
     )
-    // =============================================================
-    // Passoword Requirement
-    // =============================================================
 
     implementation(
         "com.nulab-inc:zxcvbn:1.9.0")
 
-    // =============================================================
-    // TESTING
-    // =============================================================
 
     testImplementation(
         libs.junit
