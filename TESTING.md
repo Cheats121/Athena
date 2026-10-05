@@ -249,7 +249,7 @@ Covers vault display and search behavior, including:
 
 ## Automated Test Summary
 
-Athena's automated suite covers the core security and application workflows, including vault creation and unlocking, recovery-key handling, encryption and tamper detection, biometric authentication, session and timeout behavior, clipboard protection, secure input handling, password generation and strength checks, credential management, vault navigation, and main application behavior.
+Athena's automated suite covers the core security and application workflows.
 
 **Total automated tests passed: 244 / 244**
 
