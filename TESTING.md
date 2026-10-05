@@ -1,6 +1,6 @@
 # Athena Testing
 
-Athena includes automated and manual testing focused on vault integrity, authentication, session handling, secure UI behavior, and release reliability.
+Athena includes automated and manual testing focused on vault integrity, authentication, recovery-key handling, session security, secure UI behavior, biometric protection, and release reliability.
 
 ---
 
@@ -8,24 +8,72 @@ Athena includes automated and manual testing focused on vault integrity, authent
 
 ### VaultManagerInstrumentedTest
 
-Covers the encrypted vault lifecycle, including:
+Covers the v4 encrypted vault lifecycle, including:
 
-- vault creation
-- correct master password unlock
-- wrong password rejection
-- vault save/load behavior
-- encrypted payload handling
+- v4 vault creation
+- correct master password and recovery key unlock
+- wrong master password rejection
+- wrong recovery key rejection
+- encrypted save and load behavior
+- AES-256-GCM vault encryption
+- DEK wrapping and unwrapping
+- HKDF-SHA-256 key combination
+- Argon2id parameter validation
+- vault identifier handling
 - tamper detection
+- corrupted vault rejection
 - authenticated overwrite protection
 - rollback behavior
-- Argon2 parameter validation
-- key derivation behavior
-- vault identifier handling
-- DEK verification
 - malformed vault rejection
 - size and input bounds
+- defensive-copy behavior
 
-**Result:** 28 / 28 passed
+---
+
+### RecoveryKeyStoreInstrumentedTest
+
+Covers trusted-device recovery-key caching, including:
+
+- recovery-key encryption using Android Keystore
+- vault-specific recovery-key storage
+- recovery-key loading
+- incorrect vault identifier handling
+- clearing cached recovery keys
+- clearing all cached recovery-key state
+- invalid or corrupted stored state
+- defensive handling of sensitive key material
+
+---
+
+### RecoveryKeyCodecTest
+
+Covers recovery-key encoding and decoding, including:
+
+- 32-byte recovery-key encoding
+- URL-safe Base64 representation
+- display formatting
+- whitespace-tolerant decoding
+- invalid input rejection
+- incorrect decoded key length rejection
+
+---
+
+### BaseSecureActivityInstrumentedTest
+
+Covers new-vault master-password creation, including:
+
+- minimum password length
+- maximum password length
+- uppercase requirement
+- lowercase requirement
+- numeric requirement
+- symbol requirement
+- whitespace not counting as a symbol
+- exact password confirmation
+- password callback behavior
+- password-strength display
+- zxcvbn strength feedback
+- advisory strength behavior
 
 ---
 
@@ -36,11 +84,11 @@ Covers persisted vault session metadata and runtime integration, including:
 - vault URI storage
 - biometric-enabled state
 - session restoration
-- forgetting a vault
-- runtime session cleanup
+- vault-session cleanup
+- recovery-key cache cleanup
+- biometric state cleanup
+- runtime-session cleanup
 - preference handling
-
-**Result:** 17 / 17 passed
 
 ---
 
@@ -53,8 +101,6 @@ Covers sensitive clipboard behavior, including:
 - replacement of existing clear timers
 - manual sensitive clipboard clearing
 - repeated copy operations
-
-**Result:** 10 / 10 passed
 
 ---
 
@@ -69,15 +115,11 @@ Covers secure password generation, including:
 - symbol requirement
 - randomness-related constraints
 
-**Result:** 6 / 6 passed
-
 ---
 
 ### InstantPasswordTransformationMethodTest
 
 Covers immediate password masking behavior.
-
-**Result:** 8 / 8 passed
 
 ---
 
@@ -89,8 +131,6 @@ Covers vault entry list behavior, including:
 - true index preservation
 - filtered results
 - adapter consistency
-
-**Result:** 8 / 8 passed
 
 ---
 
@@ -104,15 +144,11 @@ Covers secure vault locking, including:
 - navigation back to the main activity
 - vault URI preservation where appropriate
 
-**Result:** 8 / 8 passed
-
 ---
 
 ### TimeoutManagerInstrumentedTest
 
-Covers inactivity timeout behavior.
-
-**Result:** 8 / 8 passed
+Covers inactivity timeout behavior and secure session expiry.
 
 ---
 
@@ -121,12 +157,13 @@ Covers inactivity timeout behavior.
 Covers biometric-protected DEK storage behavior, including:
 
 - wrapped DEK persistence
-- Keystore integration
+- Android Keystore integration
+- biometric-protected key usage
 - clearing biometric state
 - invalid state handling
 - biometric metadata behavior
-
-**Result:** 27 / 27 passed
+- hardware-backed Keystore checks
+- enrollment-sensitive key behavior
 
 ---
 
@@ -135,14 +172,15 @@ Covers biometric-protected DEK storage behavior, including:
 Covers protected credential actions, including:
 
 - password reveal
+- password masking
 - password copy
 - editing
 - deletion
 - biometric authentication
-- master password fallback
+- master-password re-authentication
 - correct entry index handling
-
-**Result:** 14 / 14 passed
+- recovery-key-backed re-authentication behavior
+- sensitive UI cleanup
 
 ---
 
@@ -156,8 +194,7 @@ Covers secure input behavior, including:
 - autofill restrictions
 - long-click behavior
 - immediate masking
-
-**Result:** 13 / 13 passed
+- secure cursor and input behavior
 
 ---
 
@@ -171,16 +208,29 @@ Covers credential editing, including:
 - encrypted save behavior
 - discard confirmation
 - sensitive UI cleanup
-
-**Result:** 19 / 19 passed
+- v4 vault session integration
 
 ---
 
 ### MainActivityInstrumentedTest
 
-Covers main-screen vault workflows.
+Covers main-screen vault workflows, including:
 
-**Result:** 15 / 15 passed
+- initial application state
+- remembered vault handling
+- correct master-password unlock
+- incorrect master-password rejection
+- recovery-key-required unlock
+- invalid recovery-key rejection
+- incorrect recovery-key rejection
+- successful recovery-key unlock
+- recovery-key caching after successful authentication
+- password-only unlock after recovery-key caching
+- session establishment
+- vault URI persistence
+- sensitive password cleanup
+- biometric unlock integration
+- password masking behavior
 
 ---
 
@@ -189,99 +239,23 @@ Covers main-screen vault workflows.
 Covers vault display and search behavior, including:
 
 - vault loading
+- runtime DEK usage
 - search filtering
 - real entry index preservation
 - display name handling
-
-**Result:** 17 / 17 passed
+- v4 session behavior
 
 ---
 
 ## Automated Test Summary
 
-| Test Suite | Passed |
-|---|---:|
-| VaultManagerInstrumentedTest | 28 / 28 |
-| VaultSessionManagerInstrumentedTest | 17 / 17 |
-| ClipboardUtilsInstrumentedTest | 10 / 10 |
-| PasswordGeneratorTest | 6 / 6 |
-| InstantPasswordTransformationMethodTest | 8 / 8 |
-| VaultAdapterInstrumentedTest | 8 / 8 |
-| VaultLockerInstrumentedTest | 8 / 8 |
-| TimeoutManagerInstrumentedTest | 8 / 8 |
-| BiometricStoreInstrumentedTest | 27 / 27 |
-| EntryDetailActivityInstrumentedTest | 14 / 14 |
-| SecureEditTextInstrumentedTest | 13 / 13 |
-| EditEntryActivityInstrumentedTest | 19 / 19 |
-| MainActivityInstrumentedTest | 15 / 15 |
-| VaultActivityInstrumentedTest | 17 / 17 |
+Athena's automated suite covers the core security and application workflows, including vault creation and unlocking, recovery-key handling, encryption and tamper detection, biometric authentication, session and timeout behavior, clipboard protection, secure input handling, password generation and strength checks, credential management, vault navigation, and main application behavior.
 
-**Total automated tests passed: 198 / 198**
+**Total automated tests passed: 244 / 244**
 
 ---
 
-## Manual Release Testing
-
-The signed release APK was also manually smoke-tested after enabling R8 and resource shrinking.
-
-Manual checks included:
-
-- application launch
-- vault creation
-- correct password unlock
-- incorrect password rejection
-- credential creation
-- credential editing
-- credential deletion
-- password reveal
-- password copy
-- clipboard clearing
-- vault timeout behavior
-- biometric quick unlock
-- About / security information
-- signing certificate verification
-- release build detection
-- screenshot protection in release builds
-
----
-
-## Known Testing Gaps
-
-The current test suite is substantial, but it is not a substitute for an independent security audit.
-
-Areas for future testing include:
-
-- broader biometric testing across real devices
-- process death and state restoration
-- Android lifecycle edge cases
-- Storage Access Framework provider edge cases
-- device-specific Keystore behavior
-- StrongBox-specific behavior
-- additional release-build instrumentation
-- fuzzing of malformed vault files
-- long-running reliability testing
-- accessibility testing
-
----
-
-## Security Testing Philosophy
-
-Athena's tests focus on validating security-sensitive behavior rather than only checking UI output.
-
-Key goals include:
-
-- reject invalid or tampered vault data
-- prevent incorrect entry indexing
-- minimize plaintext credential exposure
-- clear sensitive clipboard data
-- clear runtime keys when locking
-- require re-authentication for sensitive actions
-- verify authenticated vault writes
-- validate release security controls
-
----
-
-## Disclaimer
+## ⚠️ Disclaimer
 
 Passing the automated test suite does not prove that Athena is free from security vulnerabilities.
 
